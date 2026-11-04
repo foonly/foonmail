@@ -10,6 +10,7 @@ import (
 	"gioui.org/gesture"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -24,7 +25,7 @@ import (
 
 const (
 	listHints = "j/k move · Enter open · c folders · N read/unread · / filter · = and * first/last · q quit"
-	viewHints = "Esc, q or i back · j/k next/previous conversation · n/p next/previous message · Space and - page · h quoted text · number + Enter opens a link"
+	viewHints = "Esc, q or i back · j/k next/previous conversation · n/p or ←/→ next/previous message · Space and - page · h quoted text · number + Enter opens a link"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -60,9 +61,36 @@ func (u *ui) layout(gtx layout.Context) {
 	case modeFolders:
 		u.layoutFolders(gtx)
 	}
+	u.releaseTextFocus(gtx)
 	if u.focusReq != nil {
 		gtx.Execute(key.FocusCmd{Tag: u.focusReq})
 		u.focusReq = nil
+	}
+}
+
+// releaseTextFocus gives the keyboard back to the conversation view when a
+// message's text has focus but nothing selected. Clicking into the text
+// focuses it (it needs focus for Ctrl+C), and while focused it takes the
+// arrow and paging keys. A drag keeps focus, and so does a selection, so
+// copying works; the first arrow press clears the selection and the next
+// one navigates again.
+func (u *ui) releaseTextFocus(gtx layout.Context) {
+	for {
+		ev, ok := gtx.Event(pointer.Filter{Target: u.viewPtr, Kinds: pointer.Press | pointer.Release | pointer.Cancel})
+		if !ok {
+			break
+		}
+		if pe, ok := ev.(pointer.Event); ok {
+			u.pressing = pe.Kind == pointer.Press
+		}
+	}
+	if u.mode != modeView || u.conv == nil || u.pressing {
+		return
+	}
+	for _, p := range u.conv.parts {
+		if gtx.Focused(&p.body) && p.body.SelectionLen() == 0 {
+			gtx.Execute(key.FocusCmd{})
+		}
 	}
 }
 
@@ -359,6 +387,8 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: key.NamePageUp},
 			key.Filter{Name: key.NameDownArrow},
 			key.Filter{Name: key.NameUpArrow},
+			key.Filter{Name: key.NameLeftArrow},
+			key.Filter{Name: key.NameRightArrow},
 			key.Filter{Name: key.NameReturn},
 			key.Filter{Name: key.NameEnter},
 			key.Filter{Name: key.NameDeleteBackward},
@@ -398,9 +428,9 @@ func (u *ui) updateView(gtx layout.Context) {
 				u.moveTo(u.sel - 1)
 				u.open()
 			}
-		case name == "N":
+		case name == "N" || name == key.NameRightArrow:
 			o.list.Position = layout.Position{First: min(o.list.Position.First+1, len(o.parts)-1)}
-		case name == "P":
+		case name == "P" || name == key.NameLeftArrow:
 			first := o.list.Position.First
 			if o.list.Position.Offset == 0 {
 				first--
@@ -475,6 +505,11 @@ func (u *ui) convHeader(gtx layout.Context) layout.Dimensions {
 func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 	o := u.conv
 	u.viewH = gtx.Constraints.Max.Y
+	// Watch the mouse button without taking events from the text (see
+	// releaseTextFocus).
+	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+	defer pointer.PassOp{}.Push(gtx.Ops).Pop()
+	event.Op(gtx.Ops, u.viewPtr)
 	width := max(40, gtx.Constraints.Max.X/max(1, gtx.Sp(u.th.TextSize)*6/10))
 	return material.List(u.th, &o.list).Layout(gtx, len(o.parts), func(gtx layout.Context, i int) layout.Dimensions {
 		return layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}.Layout(gtx, u.partWidget(o, o.parts[i], i, width))

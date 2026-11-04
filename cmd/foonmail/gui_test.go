@@ -473,3 +473,59 @@ func TestDisplayHelpers(t *testing.T) {
 		t.Errorf("attachments = %q", got)
 	}
 }
+
+func TestArrowsMoveBetweenMessages(t *testing.T) {
+	h := newHarness(t)
+	h.height = 160 // less than one message tall, so each message can be scrolled to the top
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	o := h.u.conv
+	h.press(key.NameLeftArrow)
+	if o.list.Position.First != 1 {
+		t.Errorf("←: at message %d, want 1", o.list.Position.First)
+	}
+	h.press(key.NameRightArrow)
+	if o.list.Position.First != 2 {
+		t.Errorf("→: at message %d, want 2", o.list.Position.First)
+	}
+}
+
+func TestTextFocusIsReleasedWithoutSelection(t *testing.T) {
+	h := newHarness(t)
+	h.height = 160
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	o := h.u.conv
+	body := &o.parts[2].body
+	src := h.r.Source()
+
+	// A click that selects nothing gives the keyboard back.
+	src.Execute(key.FocusCmd{Tag: body})
+	h.frame()
+	h.frame()
+	if src.Focused(body) {
+		t.Fatal("text kept focus with nothing selected")
+	}
+	h.press(key.NameLeftArrow)
+	if o.list.Position.First != 1 {
+		t.Errorf("← after clicking into text: at message %d, want 1", o.list.Position.First)
+	}
+
+	// A selection keeps focus, so it can be copied.
+	h.press(key.NameRightArrow)
+	src.Execute(key.FocusCmd{Tag: body})
+	body.SetCaret(0, 4)
+	h.frame()
+	h.frame()
+	if !src.Focused(body) {
+		t.Error("text lost focus while something was selected")
+	}
+
+	// While the mouse button is down (a drag), focus stays too.
+	body.ClearSelection()
+	h.u.pressing = true
+	h.frame()
+	if !src.Focused(body) {
+		t.Error("text lost focus during a drag")
+	}
+}

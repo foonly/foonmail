@@ -107,6 +107,9 @@ type ui struct {
 	folderTag *int
 	folderLst widget.List
 
+	viewPtr  *int // pointer tag over the conversation, to see the mouse button
+	pressing bool // a mouse button is down in the conversation
+
 	status   *rpc.AccountStatus // nil until known
 	down     bool               // the daemon didn't answer the last Status call
 	notice   string             // transient message in the status bar

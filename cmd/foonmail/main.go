@@ -126,6 +126,7 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 		now:       time.Now,
 		listTag:   new(int),
 		folderTag: new(int),
+		viewPtr:   new(int),
 		mono:      font.Font{Typeface: "monospace"},
 		results:   make(chan func(), 256),
 		openURL:   xdgOpen,
