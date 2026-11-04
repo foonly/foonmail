@@ -71,16 +71,17 @@ type htmlConv struct {
 	lists       []listState
 	outlookRest bool // everything from here on is an Outlook-quoted original
 
-	links   []Link
-	linkNum map[string]int
+	links      []Link
+	linkNum    map[string]int
+	linkOffset int
 }
 
-func htmlToText(src string) converted {
+func htmlToText(src string, linkOffset int) converted {
 	doc, err := html.Parse(strings.NewReader(src))
 	if err != nil {
 		return converted{text: tidy(src)}
 	}
-	c := &htmlConv{linkNum: map[string]int{}}
+	c := &htmlConv{linkNum: map[string]int{}, linkOffset: linkOffset}
 	c.node(doc)
 	c.endLine()
 	return converted{text: c.render(), links: c.links}
@@ -211,7 +212,7 @@ func (c *htmlConv) link(n *html.Node) {
 	}
 	num, ok := c.linkNum[href]
 	if !ok {
-		num = len(c.links) + 1
+		num = c.linkOffset + len(c.links) + 1
 		c.linkNum[href] = num
 		c.links = append(c.links, Link{N: num, URL: href})
 	}

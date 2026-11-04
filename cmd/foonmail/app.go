@@ -26,9 +26,10 @@ import (
 )
 
 // daemon is what the GUI needs from foonmaild (rpc.Client), so tests can
-// use a fake. It is nil when the daemon isn't reachable.
+// use a fake. It is nil when there is no session bus.
 type daemon interface {
 	FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error)
+	SyncFolder(ctx context.Context, folderID int64) error
 	SetFlags(ctx context.Context, folderID int64, uids []uint32, add, remove []string) error
 	Acknowledge(ctx context.Context) error
 	Status(ctx context.Context) ([]rpc.AccountStatus, error)
@@ -39,19 +40,35 @@ type mode int
 const (
 	modeList mode = iota
 	modeView
+	modeFolders
 )
 
-// message is the open message.
-type message struct {
-	sum        cache.Summary
-	loading    bool
-	err        error
-	rendered   *render.Message
+// part is one message of the open conversation.
+type part struct {
+	entry    cache.Entry
+	loading  bool
+	err      error
+	rendered *render.Message
+	body     widget.Selectable
+}
+
+// openConv is the conversation being read.
+type openConv struct {
+	conv       conversation
+	parts      []*part
 	showQuotes bool
 	linkInput  string // digits typed to open a link
+	list       widget.List
+}
 
-	body widget.Selectable
-	list widget.List
+func (o *openConv) links() []render.Link {
+	var out []render.Link
+	for _, p := range o.parts {
+		if p.rendered != nil {
+			out = append(out, p.rendered.Links...)
+		}
+	}
+	return out
 }
 
 type ui struct {
@@ -63,13 +80,16 @@ type ui struct {
 	now    func() time.Time
 
 	account   *config.Account
+	own       []string // lowercased own addresses
 	accountID int64
 	folder    cache.Folder
+	sent      *cache.Folder // the \Sent folder, for replies shown in conversations
 
-	items []cache.Summary // the folder, newest first
-	view  []int           // indices into items, after filtering
-	sel   int             // index into view
-	mode  mode
+	entries []cache.Entry // the folder's messages, then Sent's
+	convs   []conversation
+	view    []int // indices into convs, after filtering
+	sel     int   // index into view
+	mode    mode
 
 	list    widget.List
 	listTag *int
@@ -80,12 +100,17 @@ type ui struct {
 	search    widget.Editor
 	searching bool
 
-	msg *message
+	conv *openConv
+
+	folders   []folderRow
+	folderSel int
+	folderTag *int
+	folderLst widget.List
 
 	status   *rpc.AccountStatus // nil until known
 	down     bool               // the daemon didn't answer the last Status call
-	openURL  func(string) error // opens a link; xdg-open
 	notice   string             // transient message in the status bar
+	openURL  func(string) error // opens a link; xdg-open
 	focusReq event.Tag
 
 	results chan func()
@@ -114,28 +139,36 @@ func (u *ui) drain() {
 	}
 }
 
-// reload rereads the folder from the cache, keeping the selection.
+// reload rereads the folder (and Sent, for replies) from the cache and
+// regroups it, keeping the selected conversation.
 func (u *ui) reload() {
-	keep := uint32(0)
-	if s := u.current(); s != nil {
-		keep = s.UID
+	keep := ""
+	if c := u.current(); c != nil {
+		keep = c.key
 	}
-	items, err := u.db.List(context.Background(), u.folder.ID, 1_000_000, 0)
+	ctx := context.Background()
+	entries, err := u.db.Entries(ctx, u.folder.ID)
 	if err != nil {
 		u.notice = "Reading the cache failed: " + err.Error()
 		return
 	}
-	u.items = items
+	if u.sent != nil && u.sent.ID != u.folder.ID {
+		if sent, err := u.db.Entries(ctx, u.sent.ID); err == nil {
+			entries = append(entries, sent...)
+		}
+	}
+	u.entries = entries
+	u.convs = buildConversations(entries, u.folder.ID, u.own)
 	u.applyFilter(keep)
 }
 
-// applyFilter rebuilds view from the search field, keeping the message
-// with UID keep selected if it is still shown.
-func (u *ui) applyFilter(keep uint32) {
+// applyFilter rebuilds view from the search field, keeping the
+// conversation with key keep selected if it is still shown.
+func (u *ui) applyFilter(keep string) {
 	u.view = u.view[:0]
 	words := strings.Fields(u.search.Text())
 	if !u.searching || len(words) == 0 {
-		for i := range u.items {
+		for i := range u.convs {
 			u.view = append(u.view, i)
 		}
 	} else {
@@ -147,15 +180,18 @@ func (u *ui) applyFilter(keep uint32) {
 		for _, h := range hits {
 			match[h.UID] = true
 		}
-		for i, it := range u.items {
-			if match[it.UID] {
-				u.view = append(u.view, i)
+		for i, c := range u.convs {
+			for _, m := range c.members {
+				if m.FolderID == u.folder.ID && match[m.UID] {
+					u.view = append(u.view, i)
+					break
+				}
 			}
 		}
 	}
 	u.sel = 0
 	for vi, i := range u.view {
-		if u.items[i].UID == keep {
+		if u.convs[i].key == keep {
 			u.sel = vi
 			break
 		}
@@ -163,11 +199,11 @@ func (u *ui) applyFilter(keep uint32) {
 	u.ensureVisible()
 }
 
-func (u *ui) current() *cache.Summary {
+func (u *ui) current() *conversation {
 	if u.sel < 0 || u.sel >= len(u.view) {
 		return nil
 	}
-	return &u.items[u.view[u.sel]]
+	return &u.convs[u.view[u.sel]]
 }
 
 func (u *ui) moveTo(i int) {
@@ -203,32 +239,49 @@ func (u *ui) rowAt(y int) int {
 	return i
 }
 
-// open shows the selected message, fetching and rendering it in the
-// background, and marks it read.
+// open shows the selected conversation, scrolled to its first unread
+// message (or the last one), and marks its messages in the folder read.
+// Bodies are fetched and rendered in the background, in order, so link
+// numbers run on from one message to the next.
 func (u *ui) open() {
-	s := u.current()
-	if s == nil {
+	c := u.current()
+	if c == nil {
 		return
 	}
-	m := &message{sum: *s, loading: true}
-	m.list.Axis = layout.Vertical
-	u.msg, u.mode = m, modeView
-	sum := *s
-	go func() {
-		raw, err := u.loadRaw(sum)
-		var r *render.Message
-		if err == nil {
-			r, err = render.Render(raw, render.Options{})
+	o := &openConv{conv: *c}
+	o.list.Axis = layout.Vertical
+	target := -1
+	for i, m := range c.members {
+		o.parts = append(o.parts, &part{entry: m, loading: true})
+		if target < 0 && m.FolderID == u.folder.ID && unread(m.Summary) {
+			target = i
 		}
-		u.post(func() {
-			if err == nil && unread(sum) {
-				u.setSeen(sum.UID, true)
+	}
+	if target < 0 {
+		target = len(c.members) - 1
+	}
+	o.list.Position.First = target
+	u.conv, u.mode = o, modeView
+
+	toMark := c.folderUIDs(u.folder.ID, true)
+	go func() {
+		offset := 0
+		anyShown := false
+		for _, p := range o.parts {
+			raw, err := u.loadRaw(p.entry.Summary)
+			var r *render.Message
+			if err == nil {
+				r, err = render.Render(raw, render.Options{LinkOffset: offset})
 			}
-			if u.msg != m {
-				return // the user moved on
+			if r != nil {
+				offset += len(r.Links)
+				anyShown = true
 			}
-			m.loading, m.rendered, m.err = false, r, err
-		})
+			u.post(func() { p.loading, p.rendered, p.err = false, r, err })
+		}
+		if anyShown && len(toMark) > 0 {
+			u.post(func() { u.setSeen(toMark, true) })
+		}
 	}()
 }
 
@@ -244,13 +297,12 @@ func (u *ui) loadRaw(s cache.Summary) ([]byte, error) {
 		return nil, errors.New("foonmaild isn't running, and this message hasn't been downloaded yet")
 	}
 	id, err := u.daemon.FetchBody(ctx, s.FolderID, s.UID)
-	if errors.Is(err, rpc.ErrNotRunning) {
+	switch {
+	case errors.Is(err, rpc.ErrNotRunning):
 		return nil, errors.New("foonmaild isn't running, and this message hasn't been downloaded yet")
-	}
-	if errors.Is(err, rpc.ErrOffline) {
+	case errors.Is(err, rpc.ErrOffline):
 		return nil, errors.New("offline, and this message hasn't been downloaded yet")
-	}
-	if err != nil {
+	case err != nil:
 		return nil, err
 	}
 	raw, err := u.db.Raw(ctx, id)
@@ -260,23 +312,37 @@ func (u *ui) loadRaw(s cache.Summary) ([]byte, error) {
 	return raw, err
 }
 
-// setSeen marks a message read or unread: at once in the list, then on the
-// server through the daemon, undoing the change if that fails. It runs on
-// the UI goroutine.
-func (u *ui) setSeen(uid uint32, seen bool) {
-	apply := func(on bool) {
-		for i := range u.items {
-			if u.items[i].UID == uid {
-				u.items[i].Flags = setFlag(u.items[i].Flags, `\Seen`, on)
-			}
-		}
-		if u.msg != nil && u.msg.sum.UID == uid {
-			u.msg.sum.Flags = setFlag(u.msg.sum.Flags, `\Seen`, on)
-		}
+// setSeen marks messages of the current folder read or unread: at once in
+// the list, then on the server through the daemon, undoing the change if
+// that fails. It runs on the UI goroutine.
+func (u *ui) setSeen(uids []uint32, seen bool) {
+	if len(uids) == 0 {
+		return
 	}
 	if u.daemon == nil {
 		u.notice = "foonmaild isn't running: can't change flags"
 		return
+	}
+	folder := u.folder.ID
+	apply := func(on bool) {
+		if u.folder.ID != folder {
+			return
+		}
+		set := map[uint32]bool{}
+		for _, uid := range uids {
+			set[uid] = true
+		}
+		for i := range u.entries {
+			if e := &u.entries[i]; e.FolderID == folder && set[e.UID] {
+				e.Flags = setFlag(e.Flags, `\Seen`, on)
+			}
+		}
+		keep := ""
+		if c := u.current(); c != nil {
+			keep = c.key
+		}
+		u.convs = buildConversations(u.entries, folder, u.own)
+		u.applyFilter(keep)
 	}
 	apply(seen)
 	go func() {
@@ -288,9 +354,61 @@ func (u *ui) setSeen(uid uint32, seen bool) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := u.daemon.SetFlags(ctx, u.folder.ID, []uint32{uid}, add, remove); err != nil {
+		if err := u.daemon.SetFlags(ctx, folder, uids, add, remove); err != nil {
 			u.post(func() { apply(!seen); u.notice = "Couldn't change the flag: " + err.Error() })
 		}
+	}()
+}
+
+// toggleRead marks a conversation read if any of it is unread, otherwise
+// marks its newest message in the folder unread.
+func (u *ui) toggleRead() {
+	c := u.current()
+	if c == nil {
+		return
+	}
+	if c.unread > 0 {
+		u.setSeen(c.folderUIDs(u.folder.ID, true), true)
+		return
+	}
+	all := c.folderUIDs(u.folder.ID, false)
+	if len(all) > 0 {
+		u.setSeen(all[len(all)-1:], false)
+	}
+}
+
+// switchFolder shows another folder. Folders other than INBOX are synced
+// in the background; the cached copy shows meanwhile.
+func (u *ui) switchFolder(f cache.Folder) {
+	u.folder = f
+	u.search.SetText("")
+	u.searching = false
+	u.list.Position = layout.Position{}
+	u.sel = 0
+	u.reload()
+	u.mode = modeList
+	u.focusReq = u.listTag
+	if f.Name == "INBOX" || u.daemon == nil {
+		return
+	}
+	syncing := "Syncing " + f.Name + "…"
+	u.notice = syncing
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		err := u.daemon.SyncFolder(ctx, f.ID)
+		u.post(func() {
+			switch {
+			case err == nil:
+				if u.notice == syncing {
+					u.notice = ""
+				}
+			case errors.Is(err, rpc.ErrOffline) || errors.Is(err, rpc.ErrNotRunning):
+				u.notice = f.Name + ": offline, showing the cached copy"
+			default:
+				u.notice = "Syncing " + f.Name + " failed: " + err.Error()
+			}
+		})
 	}()
 }
 
@@ -333,13 +451,10 @@ func (u *ui) acknowledge() {
 }
 
 // openLink opens a numbered link with the desktop's handler.
-func (u *ui) openLink(m *message) {
-	typed := m.linkInput
-	m.linkInput = ""
-	if m.rendered == nil {
-		return
-	}
-	url, ok := linkURL(m.rendered.Links, typed)
+func (u *ui) openLink(o *openConv) {
+	typed := o.linkInput
+	o.linkInput = ""
+	url, ok := linkURL(o.links(), typed)
 	if !ok {
 		u.notice = fmt.Sprintf("No link [%s] to open", typed)
 		return

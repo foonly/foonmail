@@ -516,6 +516,74 @@ func (d *DB) List(ctx context.Context, folderID int64, limit, offset int) ([]Sum
 		folderID, limit, offset)
 }
 
+// Entry is a list row with the headers threading needs.
+type Entry struct {
+	Summary
+	MessageID  string
+	InReplyTo  string
+	References []string
+}
+
+// Entries returns a folder's messages, newest first, with threading headers.
+func (d *DB) Entries(ctx context.Context, folderID int64) ([]Entry, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT m.id, l.folder_id, l.uid, m.subject, m.from_name, m.from_addr, m.date, l.flags, m.raw IS NOT NULL,
+		       m.message_id, m.in_reply_to, m.refs
+		FROM locations l JOIN messages m ON m.id = l.message_id
+		WHERE l.folder_id = ? ORDER BY m.date DESC, l.uid DESC`, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		var date int64
+		var flags, refs string
+		if err := rows.Scan(&e.ID, &e.FolderID, &e.UID, &e.Subject, &e.From.Name, &e.From.Addr,
+			&date, &flags, &e.Fetched, &e.MessageID, &e.InReplyTo, &refs); err != nil {
+			return nil, err
+		}
+		if date != 0 {
+			e.Date = time.Unix(date, 0)
+		}
+		e.Flags = splitFlags(flags)
+		if refs != "" {
+			e.References = strings.Split(refs, " ")
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// Counts is the number of messages and unread messages in a folder.
+type Counts struct {
+	Total, Unread int
+}
+
+// FolderCounts returns message and unread counts for every folder of an
+// account that has messages in the cache.
+func (d *DB) FolderCounts(ctx context.Context, accountID int64) (map[int64]Counts, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT l.folder_id, count(*), sum(instr(' ' || l.flags || ' ', ' \Seen ') = 0)
+		FROM locations l JOIN folders f ON f.id = l.folder_id
+		WHERE f.account_id = ? GROUP BY l.folder_id`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]Counts{}
+	for rows.Next() {
+		var id int64
+		var c Counts
+		if err := rows.Scan(&id, &c.Total, &c.Unread); err != nil {
+			return nil, err
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}
+
 // Search finds messages whose subject, sender or recipients contain words
 // starting with each of the given words, newest first. folderID 0 searches
 // every folder of the account.

@@ -82,11 +82,15 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 		return nil, nil, err
 	}
 	u := newUI(db, log)
-	u.account, u.accountID = acct, accountID
+	u.account, u.accountID, u.own = acct, accountID, acct.Addresses()
 	found := false
 	for _, f := range folders {
 		if f.Name == "INBOX" {
 			u.folder, found = f, true
+		}
+		if f.SpecialUse == `\Sent` {
+			sent := f
+			u.sent = &sent
 		}
 	}
 	if !found {
@@ -116,16 +120,18 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 
 func newUI(db *cache.DB, log *slog.Logger) *ui {
 	u := &ui{
-		th:      material.NewTheme(),
-		db:      db,
-		log:     log,
-		now:     time.Now,
-		listTag: new(int),
-		mono:    font.Font{Typeface: "monospace"},
-		results: make(chan func(), 256),
-		openURL: xdgOpen,
+		th:        material.NewTheme(),
+		db:        db,
+		log:       log,
+		now:       time.Now,
+		listTag:   new(int),
+		folderTag: new(int),
+		mono:      font.Font{Typeface: "monospace"},
+		results:   make(chan func(), 256),
+		openURL:   xdgOpen,
 	}
 	u.list.Axis = layout.Vertical
+	u.folderLst.Axis = layout.Vertical
 	u.th.TextSize = 15
 	u.search.SingleLine, u.search.Submit = true, true
 	u.focusReq = u.listTag
@@ -147,9 +153,12 @@ func (u *ui) follow(events <-chan rpc.Event) {
 	for ev := range events {
 		switch ev := ev.(type) {
 		case rpc.FolderChanged:
-			if ev.FolderID == u.folder.ID {
-				u.post(u.reload)
-			}
+			id := ev.FolderID
+			u.post(func() {
+				if id == u.folder.ID || (u.sent != nil && id == u.sent.ID) {
+					u.reload()
+				}
+			})
 		case rpc.StatusChanged:
 			u.refreshStatus()
 		}

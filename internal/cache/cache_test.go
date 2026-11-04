@@ -295,6 +295,27 @@ func TestFolderByIDAndLocation(t *testing.T) {
 	}
 }
 
+func TestEntriesAndCounts(t *testing.T) {
+	f := newFixture(t)
+	reply := msg(2, "reply@x", "Re: A", "Bob Example")
+	reply.Envelope.InReplyTo = "a@x"
+	reply.Envelope.References = []string{"root@x", "a@x"}
+	if err := f.db.AddMessages(ctx, f.inbox.ID, []NewMessage{msg(1, "a@x", "A", "Bob Example", `\Seen`), reply}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.AddMessages(ctx, f.archive.ID, []NewMessage{msg(9, "old@x", "Old", "Bob Example", `\Seen`)}); err != nil {
+		t.Fatal(err)
+	}
+	es := get(f.db.Entries(ctx, f.inbox.ID))
+	if len(es) != 2 || es[0].UID != 2 || es[0].InReplyTo != "a@x" || len(es[0].References) != 2 || es[1].MessageID != "a@x" {
+		t.Errorf("Entries = %+v", es)
+	}
+	counts := get(f.db.FolderCounts(ctx, f.account))
+	if counts[f.inbox.ID] != (Counts{Total: 2, Unread: 1}) || counts[f.archive.ID] != (Counts{Total: 1, Unread: 0}) {
+		t.Errorf("FolderCounts = %+v", counts)
+	}
+}
+
 func TestDeleteFolder(t *testing.T) {
 	f := newFixture(t)
 	shared := msg(1, "shared@x", "In both", "Bob Example")

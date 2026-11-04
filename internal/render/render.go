@@ -40,6 +40,9 @@ func (s Source) String() string {
 type Options struct {
 	// PreferHTML converts the HTML part even when a usable text part exists.
 	PreferHTML bool
+	// LinkOffset is added to link numbers, so the messages of a conversation
+	// shown together get distinct numbers: the first link is LinkOffset+1.
+	LinkOffset int
 }
 
 // Address is a decoded mail address.
@@ -133,7 +136,7 @@ func Render(raw []byte, opts Options) (*Message, error) {
 	var conv converted
 	if m.HasHTML {
 		m.HTML = html
-		conv = htmlToText(html)
+		conv = htmlToText(html, opts.LinkOffset)
 	}
 
 	switch {

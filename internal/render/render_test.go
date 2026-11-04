@@ -310,3 +310,12 @@ func TestNoBody(t *testing.T) {
 		t.Errorf("%+v", m)
 	}
 }
+
+func TestLinkOffset(t *testing.T) {
+	m := mustRender(t, raw([]string{"Content-Type: text/html"},
+		`<a href="https://a.example/">a</a> <a href="https://b.example/">b</a> <a href="https://a.example/">a</a>`),
+		Options{LinkOffset: 4})
+	if m.Text != "a [5] b [6] a [5]" || len(m.Links) != 2 || m.Links[0].N != 5 || m.Links[1].N != 6 {
+		t.Errorf("text %q, links %+v", m.Text, m.Links)
+	}
+}

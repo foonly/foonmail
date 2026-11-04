@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -30,28 +31,36 @@ import (
 // the cache, as the real daemon does.
 type fakeDaemon struct {
 	db  *cache.DB
-	raw map[uint32][]byte
+	raw map[int64][]byte // by cache message id
 
 	mu       sync.Mutex
-	fetched  []uint32
+	fetched  []int64
 	flagged  []string
+	synced   []int64
 	err      error // returned by every call
 	flagsErr error
 }
 
 func (d *fakeDaemon) FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error) {
-	d.mu.Lock()
-	d.fetched = append(d.fetched, uid)
-	err := d.err
-	d.mu.Unlock()
-	if err != nil {
-		return 0, err
-	}
 	id, err := d.db.Location(ctx, folderID, uid)
 	if err != nil {
 		return 0, err
 	}
-	return id, d.db.SetRaw(ctx, id, d.raw[uid], "")
+	d.mu.Lock()
+	d.fetched = append(d.fetched, id)
+	derr := d.err
+	d.mu.Unlock()
+	if derr != nil {
+		return 0, derr
+	}
+	return id, d.db.SetRaw(ctx, id, d.raw[id], "")
+}
+
+func (d *fakeDaemon) SyncFolder(_ context.Context, folderID int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.synced = append(d.synced, folderID)
+	return d.err
 }
 
 func (d *fakeDaemon) SetFlags(_ context.Context, _ int64, uids []uint32, add, remove []string) error {
@@ -73,28 +82,52 @@ func (d *fakeDaemon) Status(context.Context) ([]rpc.AccountStatus, error) {
 	return []rpc.AccountStatus{{Name: "uplink", Online: true}}, nil
 }
 
-func (d *fakeDaemon) calls() ([]uint32, []string) {
+func (d *fakeDaemon) setErr(err error) {
+	d.mu.Lock()
+	d.err = err
+	d.mu.Unlock()
+}
+
+type calls struct {
+	fetched []int64
+	flagged []string
+	synced  []int64
+}
+
+func (d *fakeDaemon) calls() calls {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return slices.Clone(d.fetched), slices.Clone(d.flagged)
+	return calls{slices.Clone(d.fetched), slices.Clone(d.flagged), slices.Clone(d.synced)}
 }
 
 type harness struct {
-	t      *testing.T
-	u      *ui
-	db     *cache.DB
-	daemon *fakeDaemon
-	r      input.Router
-	opened []string
+	t       *testing.T
+	u       *ui
+	height  int // window height in px; default 700
+	db      *cache.DB
+	daemon  *fakeDaemon
+	r       input.Router
+	opened  []string
+	inbox   cache.Folder
+	sent    cache.Folder
+	archive cache.Folder
+	ids     map[string]int64 // cache message id by Message-ID
 }
 
-const (
-	plainMsg = "From: Bob <bob@example.com>\r\nSubject: Kahvi\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" +
-		"Käydäänkö kahvilla?\r\n\r\nOn Tue, Liisa <liisa@example.com> wrote:\r\n> Earlier\r\n> message\r\n"
-	htmlMsg = "From: News <news@example.com>\r\nSubject: Letter\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" +
-		`<p>Read <a href="https://example.com/post">this</a> or <a href="javascript:x()">that</a>.</p>`
-)
+func rawMsg(from, subject, msgID, inReplyTo, body string) []byte {
+	h := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <%s>\r\n", from, subject, msgID)
+	if inReplyTo != "" {
+		h += fmt.Sprintf("In-Reply-To: <%s>\r\nReferences: <%s>\r\n", inReplyTo, inReplyTo)
+	}
+	ct := "text/plain"
+	if strings.HasPrefix(body, "<") {
+		ct = "text/html"
+	}
+	return []byte(h + "Content-Type: " + ct + "; charset=utf-8\r\n\r\n" + strings.ReplaceAll(body, "\n", "\r\n"))
+}
 
+// newHarness builds an account with a three-message thread (the middle
+// reply in Sent), an unrelated read message, and an unsynced Archive.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	db, err := cache.Open(filepath.Join(t.TempDir(), "mail.db"))
@@ -104,31 +137,59 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(func() { db.Close() })
 	ctx := context.Background()
 	acct, _ := db.EnsureAccount(ctx, "uplink")
-	inbox, _ := db.EnsureFolder(ctx, acct, "INBOX")
+	h := &harness{t: t, db: db, ids: map[string]int64{}}
+	h.inbox, _ = db.EnsureFolder(ctx, acct, "INBOX")
+	h.sent, _ = db.EnsureFolder(ctx, acct, "Sent")
+	h.archive, _ = db.EnsureFolder(ctx, acct, "Archive")
+	db.SetFolderInfo(ctx, h.inbox.ID, ".", "")
+	db.SetFolderInfo(ctx, h.sent.ID, ".", `\Sent`)
+	db.SetFolderInfo(ctx, h.archive.ID, ".", "")
+	db.SaveSyncState(ctx, h.inbox.ID, 1, 0, 100)
+	db.SaveSyncState(ctx, h.sent.ID, 1, 0, 100)
+
 	base := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
-	var msgs []cache.NewMessage
-	for i, subj := range []string{"Kahvi", "Letter", "Third"} {
+	type m struct {
+		folder           cache.Folder
+		uid              uint32
+		msgID, inReplyTo string
+		from, addr, subj string
+		hour             int
+		seen             bool
+		body             string
+	}
+	msgs := []m{
+		{h.inbox, 1, "a", "", "Bob", "bob@example.com", "Kahvi?", 9, true, `<p>See <a href="https://one.example/">one</a>.</p>`},
+		{h.sent, 7, "b", "a", "Me", "niklas@uplink.fi", "Re: Kahvi?", 10, true, "Sure.\n\nOn Tue, Bob wrote:\n> Kahvi?\n"},
+		{h.inbox, 2, "c", "b", "Liisa", "liisa@example.com", "Re: Re: Kahvi?", 11, false, `<p>Me too, <a href="https://two.example/">two</a>.</p>`},
+		{h.inbox, 3, "x", "", "Bob", "bob@example.com", "Invoice", 8, true, "Pay it."},
+	}
+	d := &fakeDaemon{db: db, raw: map[int64][]byte{}}
+	for _, x := range msgs {
 		flags := []string{}
-		if i == 2 {
+		if x.seen {
 			flags = []string{`\Seen`}
 		}
-		msgs = append(msgs, cache.NewMessage{UID: uint32(i + 1), Flags: flags, Envelope: cache.Envelope{
-			Subject: subj, From: cache.Address{Name: "Bob", Addr: "bob@example.com"},
-			Date: base.Add(-time.Duration(i) * time.Hour), // UID 1 is newest
-		}})
+		env := cache.Envelope{MessageID: x.msgID, InReplyTo: x.inReplyTo, Subject: x.subj,
+			From: cache.Address{Name: x.from, Addr: x.addr}, Date: base.Add(time.Duration(x.hour-12) * time.Hour)}
+		if err := db.AddMessages(ctx, x.folder.ID, []cache.NewMessage{{UID: x.uid, Flags: flags, Envelope: env, Size: int64(x.uid)}}); err != nil {
+			t.Fatal(err)
+		}
+		id, _ := db.Location(ctx, x.folder.ID, x.uid)
+		h.ids[x.msgID] = id
+		d.raw[id] = rawMsg(fmt.Sprintf("%s <%s>", x.from, x.addr), x.subj, x.msgID, x.inReplyTo, x.body)
 	}
-	if err := db.AddMessages(ctx, inbox.ID, msgs); err != nil {
-		t.Fatal(err)
-	}
-	inbox, _ = db.EnsureFolder(ctx, acct, "INBOX")
+	h.inbox, _ = db.FolderByID(ctx, h.inbox.ID)
+	h.sent, _ = db.FolderByID(ctx, h.sent.ID)
+	h.archive, _ = db.FolderByID(ctx, h.archive.ID)
 
-	d := &fakeDaemon{db: db, raw: map[uint32][]byte{1: []byte(plainMsg), 2: []byte(htmlMsg), 3: []byte(plainMsg)}}
 	u := newUI(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	u.account = &config.Account{Name: "uplink"}
-	u.accountID, u.folder, u.daemon = acct, inbox, d
+	u.account = &config.Account{Name: "uplink", Email: "niklas@uplink.fi"}
+	u.own = u.account.Addresses()
+	u.accountID, u.folder, u.daemon = acct, h.inbox, d
+	u.sent = &h.sent
 	u.now = func() time.Time { return base }
-	h := &harness{t: t, u: u, db: db, daemon: d}
 	u.openURL = func(url string) error { h.opened = append(h.opened, url); return nil }
+	h.u, h.daemon = u, d
 	u.reload()
 	h.frame()
 	h.frame()
@@ -139,7 +200,7 @@ func (h *harness) frame() {
 	var ops op.Ops
 	gtx := layout.Context{
 		Ops:         &ops,
-		Constraints: layout.Exact(image.Pt(1000, 700)),
+		Constraints: layout.Exact(image.Pt(1000, cmp.Or(h.height, 700))),
 		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
 		Now:         time.Now(),
 		Source:      h.r.Source(),
@@ -172,151 +233,224 @@ func (h *harness) eventually(what string, cond func() bool) {
 	h.t.Fatalf("timed out waiting for %s", what)
 }
 
-func (h *harness) selectedUID() uint32 {
-	if s := h.u.current(); s != nil {
-		return s.UID
+func (h *harness) loaded() bool {
+	if h.u.conv == nil {
+		return false
 	}
-	return 0
+	for _, p := range h.u.conv.parts {
+		if p.loading {
+			return false
+		}
+	}
+	return true
 }
 
-func TestListOpenAndBack(t *testing.T) {
+func (h *harness) selectedKey() string {
+	if c := h.u.current(); c != nil {
+		return c.key
+	}
+	return ""
+}
+
+func TestConversationList(t *testing.T) {
 	h := newHarness(t)
-	if len(h.u.view) != 3 || h.selectedUID() != 1 {
-		t.Fatalf("list: %d items, selected uid %d; want newest first", len(h.u.view), h.selectedUID())
+	if len(h.u.convs) != 2 {
+		t.Fatalf("%d conversations, want 2", len(h.u.convs))
 	}
+	c := h.u.convs[0]
+	if c.key != "a" || len(c.members) != 3 || c.unread != 1 || c.people != "Liisa, me, Bob" || c.subject != "Kahvi?" {
+		t.Errorf("first conversation = %+v", c)
+	}
+}
 
+func TestOpenConversation(t *testing.T) {
+	h := newHarness(t)
+	h.height = 160 // less than one message tall, so each message can be scrolled to the top
 	h.press(key.NameReturn)
-	h.eventually("message rendered", func() bool { return h.u.msg != nil && h.u.msg.rendered != nil })
-	if h.u.mode != modeView || !strings.HasPrefix(h.u.msg.rendered.Text, "Käydäänkö kahvilla?") {
-		t.Errorf("mode %v, text %q", h.u.mode, h.u.msg.rendered.Text)
+	h.eventually("all parts loaded", h.loaded)
+	o := h.u.conv
+	if h.u.mode != modeView || len(o.parts) != 3 {
+		t.Fatalf("mode %v, %d parts", h.u.mode, len(o.parts))
 	}
-	h.eventually("marked read", func() bool { return !unread(h.u.items[0]) })
-	fetched, flags := h.daemon.calls()
-	if !slices.Equal(fetched, []uint32{1}) || len(flags) != 1 || flags[0] != `[1] +[\Seen] -[]` {
-		t.Errorf("daemon calls: fetched %v, flags %v", fetched, flags)
+	if o.parts[1].entry.FolderID != h.sent.ID || !strings.HasPrefix(o.parts[1].rendered.Text, "Sure.") {
+		t.Errorf("the Sent reply isn't the middle message: %+v", o.parts[1].entry)
+	}
+	// It opens at the first unread message.
+	if o.list.Position.First != 2 {
+		t.Errorf("opened at message %d, want 2 (the unread one)", o.list.Position.First)
+	}
+	// Link numbers run on across the conversation.
+	if t1, t3 := o.parts[0].rendered.Text, o.parts[2].rendered.Text; !strings.Contains(t1, "one [1]") || !strings.Contains(t3, "two [2]") {
+		t.Errorf("link numbering: %q / %q", t1, t3)
+	}
+	// Only the unread INBOX message is marked read; Sent isn't touched.
+	h.eventually("marked read", func() bool { return h.u.convs[0].unread == 0 })
+	if got := h.daemon.calls().flagged; len(got) != 1 || got[0] != `[2] +[\Seen] -[]` {
+		t.Errorf("SetFlags calls = %v", got)
 	}
 
-	// j in the message view opens the next message.
+	h.press("2")
+	h.press(key.NameReturn)
+	if !slices.Equal(h.opened, []string{"https://two.example/"}) {
+		t.Errorf("opened %v", h.opened)
+	}
+
+	// p and n move between messages.
+	h.press("P")
+	if o.list.Position.First != 1 {
+		t.Errorf("p: at message %d, want 1", o.list.Position.First)
+	}
+	h.press("N")
+	if o.list.Position.First != 2 {
+		t.Errorf("n: at message %d, want 2", o.list.Position.First)
+	}
+
+	// j opens the next conversation; Esc returns with the keyboard working.
 	h.press("J")
-	h.eventually("next message", func() bool { return h.u.msg.sum.UID == 2 && h.u.msg.rendered != nil })
-
-	// Esc goes back, and the list has the keyboard again.
+	h.eventually("next conversation", func() bool { return h.u.conv.conv.key == "x" && h.loaded() })
 	h.press(key.NameEscape)
-	if h.u.mode != modeList {
-		t.Fatal("Esc did not return to the list")
-	}
-	h.press("J")
-	if h.selectedUID() != 3 {
-		t.Errorf("j after returning: selected uid %d, want 3", h.selectedUID())
+	h.press("K")
+	if h.u.mode != modeList || h.selectedKey() != "a" {
+		t.Errorf("after Esc and k: mode %v, selected %q", h.u.mode, h.selectedKey())
 	}
 }
 
-func TestCachedBodyNeedsNoDaemon(t *testing.T) {
+func TestQuotesCollapse(t *testing.T) {
 	h := newHarness(t)
-	h.daemon.raw[1] = []byte(plainMsg)
-	id, _ := h.db.Location(context.Background(), h.u.folder.ID, 1)
-	if err := h.db.SetRaw(context.Background(), id, []byte(plainMsg), ""); err != nil {
-		t.Fatal(err)
-	}
-	h.daemon.err = rpc.ErrNotRunning
 	h.press(key.NameReturn)
-	h.eventually("message rendered from the cache", func() bool { return h.u.msg.rendered != nil })
-	if fetched, _ := h.daemon.calls(); len(fetched) != 0 {
-		t.Errorf("FetchBody called for a cached body: %v", fetched)
+	h.eventually("loaded", h.loaded)
+	o := h.u.conv
+	if got := bodyText(o.parts[1].rendered, false); !strings.Contains(got, "quoted text from Bob, 1 lines") {
+		t.Errorf("collapsed: %q", got)
+	}
+	h.press("H")
+	if !o.showQuotes {
+		t.Error("h did not show quoted text")
 	}
 }
 
-func TestDaemonDownShowsWhy(t *testing.T) {
+func TestCachedBodiesNeedNoDaemon(t *testing.T) {
 	h := newHarness(t)
-	h.daemon.err = rpc.ErrNotRunning
-	h.press(key.NameReturn)
-	h.eventually("error shown", func() bool { return h.u.msg.err != nil })
-	if !strings.Contains(h.u.msg.err.Error(), "foonmaild isn't running") {
-		t.Errorf("err = %v", h.u.msg.err)
+	for _, k := range []string{"a", "b", "c"} {
+		id := h.ids[k]
+		if err := h.db.SetRaw(context.Background(), id, h.daemon.raw[id], ""); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if !unread(h.u.items[0]) {
-		t.Error("a message that couldn't be shown was marked read")
+	h.daemon.setErr(rpc.ErrNotRunning)
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	for i, p := range h.u.conv.parts {
+		if p.err != nil {
+			t.Errorf("part %d: %v", i, p.err)
+		}
+	}
+	if got := h.daemon.calls().fetched; len(got) != 0 {
+		t.Errorf("FetchBody called for cached bodies: %v", got)
+	}
+}
+
+func TestDaemonDownShowsWhyAndKeepsUnread(t *testing.T) {
+	h := newHarness(t)
+	h.daemon.setErr(rpc.ErrNotRunning)
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	if err := h.u.conv.parts[2].err; err == nil || !strings.Contains(err.Error(), "foonmaild isn't running") {
+		t.Errorf("err = %v", err)
+	}
+	if h.u.convs[0].unread != 1 {
+		t.Error("a conversation that couldn't be shown was marked read")
 	}
 }
 
 func TestToggleReadRevertsOnFailure(t *testing.T) {
 	h := newHarness(t)
 	h.press("N", key.ModShift)
-	if unread(h.u.items[0]) {
-		t.Fatal("N did not mark the message read at once")
+	if h.u.convs[0].unread != 0 {
+		t.Fatal("N did not mark the conversation read at once")
 	}
 	h.daemon.mu.Lock()
 	h.daemon.flagsErr = errors.New("server said no")
 	h.daemon.mu.Unlock()
-	h.press("N", key.ModShift) // back to unread, which fails
-	h.eventually("reverted", func() bool { return !unread(h.u.items[0]) && strings.Contains(h.u.notice, "server said no") })
+	h.press("N", key.ModShift) // marks the newest unread, which fails
+	h.eventually("reverted", func() bool {
+		return h.u.convs[0].unread == 0 && strings.Contains(h.u.notice, "server said no")
+	})
 }
 
-func TestQuotesAndLinks(t *testing.T) {
+func TestFolderSwitch(t *testing.T) {
 	h := newHarness(t)
+	h.press("C")
+	if h.u.mode != modeFolders {
+		t.Fatal("c did not open the folder picker")
+	}
+	var labels []string
+	for _, r := range h.u.folders {
+		labels = append(labels, r.label)
+	}
+	if !slices.Equal(labels, []string{"INBOX", "Archive", "Sent"}) {
+		t.Errorf("folders = %v", labels)
+	}
+	if h.u.folders[h.u.folderSel].folder.ID != h.inbox.ID {
+		t.Error("the picker didn't start on the current folder")
+	}
+	h.press("J") // Archive
 	h.press(key.NameReturn)
-	h.eventually("rendered", func() bool { return h.u.msg.rendered != nil })
-	m := h.u.msg
-	if got := bodyText(m.rendered, false); !strings.Contains(got, "[… quoted text from Liisa, 2 lines · h shows it]") || strings.Contains(got, "Earlier") {
-		t.Errorf("collapsed: %q", got)
+	if h.u.mode != modeList || h.u.folder.ID != h.archive.ID {
+		t.Fatalf("mode %v, folder %q", h.u.mode, h.u.folder.Name)
 	}
-	h.press("H")
-	if !m.showQuotes || !strings.Contains(bodyText(m.rendered, m.showQuotes), "> Earlier") {
-		t.Error("h did not show the quoted text")
+	h.eventually("Archive synced on open", func() bool {
+		return slices.Equal(h.daemon.calls().synced, []int64{h.archive.ID})
+	})
+	if len(h.u.convs) != 0 {
+		t.Errorf("Archive shows %d conversations", len(h.u.convs))
 	}
+	// The list has the keyboard after switching.
+	h.press("C")
+	h.press("K")
+	h.press(key.NameReturn)
+	if h.u.folder.ID != h.inbox.ID {
+		t.Errorf("back to INBOX failed: %q", h.u.folder.Name)
+	}
+	if got := h.daemon.calls().synced; len(got) != 1 {
+		t.Errorf("INBOX is kept in sync by IDLE and shouldn't be synced on open: %v", got)
+	}
+}
 
-	h.press("J") // the HTML message with links
-	h.eventually("html rendered", func() bool { return h.u.msg.sum.UID == 2 && h.u.msg.rendered != nil })
-	h.press("1")
-	h.press(key.NameReturn)
-	if !slices.Equal(h.opened, []string{"https://example.com/post"}) {
-		t.Errorf("opened %v", h.opened)
-	}
-	// The javascript: link has no number to open; a missing number is reported.
-	h.press("7")
-	h.press(key.NameReturn)
-	if len(h.opened) != 1 || !strings.Contains(h.u.notice, "No link [7]") {
-		t.Errorf("opened %v, notice %q", h.opened, h.u.notice)
-	}
-	// Esc with a number typed only clears it.
-	h.press("1")
-	h.press(key.NameEscape)
-	if h.u.mode != modeView || h.u.msg.linkInput != "" {
-		t.Error("Esc with a link number typed should clear it, not leave the message")
+func TestSentFolderShowsItsOwnConversations(t *testing.T) {
+	h := newHarness(t)
+	h.u.switchFolder(h.sent)
+	if len(h.u.convs) != 1 || len(h.u.convs[0].members) != 1 {
+		t.Errorf("Sent: %+v", h.u.convs)
 	}
 }
 
 func TestFilterKeepsSelection(t *testing.T) {
 	h := newHarness(t)
-	h.press("J") // select uid 2, "Letter"
+	h.press("J") // "Invoice"
 	h.press("/", key.ModShift)
-	if !h.u.searching {
-		t.Fatal("/ did not open the filter")
-	}
-	h.u.search.SetText("lett")
-	h.u.applyFilter(h.selectedUID())
-	if len(h.u.view) != 1 || h.selectedUID() != 2 {
-		t.Errorf("filtered: %d shown, selected %d", len(h.u.view), h.selectedUID())
+	h.u.search.SetText("invo")
+	h.u.applyFilter(h.selectedKey())
+	if len(h.u.view) != 1 || h.selectedKey() != "x" {
+		t.Errorf("filtered: %d shown, selected %q", len(h.u.view), h.selectedKey())
 	}
 	h.press(key.NameEscape)
-	if h.u.searching || len(h.u.view) != 3 || h.selectedUID() != 2 {
-		t.Errorf("after Esc: searching %v, %d shown, selected %d", h.u.searching, len(h.u.view), h.selectedUID())
+	if h.u.searching || len(h.u.view) != 2 || h.selectedKey() != "x" {
+		t.Errorf("after Esc: searching %v, %d shown, selected %q", h.u.searching, len(h.u.view), h.selectedKey())
 	}
 }
 
 func TestReloadKeepsSelection(t *testing.T) {
 	h := newHarness(t)
-	h.press("J")
-	h.press("J") // uid 3
-	// A newer message arrives (the daemon wrote it; FolderChanged reloads).
-	err := h.db.AddMessages(context.Background(), h.u.folder.ID, []cache.NewMessage{{UID: 4, Envelope: cache.Envelope{
-		Subject: "Newest", Date: time.Date(2026, 11, 4, 13, 0, 0, 0, time.UTC)}}})
+	h.press("J") // "Invoice"
+	err := h.db.AddMessages(context.Background(), h.inbox.ID, []cache.NewMessage{{UID: 4, Envelope: cache.Envelope{
+		MessageID: "new", Subject: "Newest", Date: time.Date(2026, 11, 4, 13, 0, 0, 0, time.UTC)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.u.reload()
-	if len(h.u.view) != 4 || h.selectedUID() != 3 {
-		t.Errorf("after reload: %d shown, selected %d, want 4 and uid 3", len(h.u.view), h.selectedUID())
+	if len(h.u.view) != 3 || h.selectedKey() != "x" {
+		t.Errorf("after reload: %d shown, selected %q", len(h.u.view), h.selectedKey())
 	}
 }
 
@@ -337,8 +471,5 @@ func TestDisplayHelpers(t *testing.T) {
 	}
 	if got := attachmentLines(atts); len(got) != 1 || got[0] != "evil.pdf  (application/pdf, 2 KB)" {
 		t.Errorf("attachments = %q", got)
-	}
-	if got := setFlag([]string{`\Seen`, `\Flagged`}, `\Seen`, false); !slices.Equal(got, []string{`\Flagged`}) {
-		t.Errorf("setFlag = %v", got)
 	}
 }

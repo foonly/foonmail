@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · PgUp/PgDn page · = and * first/last · Enter open · N read/unread · / filter · q quit"
-	viewHints = "Esc, q or i back · j/k next/previous · Space and - page · h quoted text · number + Enter opens a link"
+	listHints = "j/k move · Enter open · c folders · N read/unread · / filter · = and * first/last · q quit"
+	viewHints = "Esc, q or i back · j/k next/previous conversation · n/p next/previous message · Space and - page · h quoted text · number + Enter opens a link"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -35,16 +35,30 @@ func (u *ui) layout(gtx layout.Context) {
 	u.rowH = gtx.Dp(30)
 	u.globalKeys(gtx)
 	paint.Fill(gtx.Ops, u.th.Bg)
-	if u.mode == modeView {
-		u.updateView(gtx)
+	// Handle the current mode's events; if that switches mode, handle the
+	// new mode's too, so whichever mode this frame ends in has registered
+	// its focus filter.
+	for range 3 {
+		m := u.mode
+		switch m {
+		case modeList:
+			u.updateList(gtx)
+		case modeView:
+			u.updateView(gtx)
+		case modeFolders:
+			u.updateFolders(gtx)
+		}
+		if u.mode == m {
+			break
+		}
 	}
-	if u.mode == modeList {
-		u.updateList(gtx)
-	}
-	if u.mode == modeList {
+	switch u.mode {
+	case modeList:
 		u.layoutList(gtx)
-	} else {
+	case modeView:
 		u.layoutView(gtx)
+	case modeFolders:
+		u.layoutFolders(gtx)
 	}
 	if u.focusReq != nil {
 		gtx.Execute(key.FocusCmd{Tag: u.focusReq})
@@ -84,6 +98,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: key.NameReturn},
 			key.Filter{Focus: t, Name: key.NameEnter},
 			key.Filter{Focus: t, Name: "N", Required: key.ModShift},
+			key.Filter{Focus: t, Name: "C"},
 			key.Filter{Focus: t, Name: "/", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: key.NameEscape},
 			key.Filter{Focus: t, Name: "Q"},
@@ -112,9 +127,9 @@ func (u *ui) updateList(gtx layout.Context) {
 		case key.NameReturn, key.NameEnter:
 			u.open()
 		case "N":
-			if s := u.current(); s != nil {
-				u.setSeen(s.UID, unread(*s))
-			}
+			u.toggleRead()
+		case "C":
+			u.openFolders()
 		case "/":
 			u.searching = true
 			u.focusReq = &u.search
@@ -157,9 +172,9 @@ func (u *ui) updateList(gtx layout.Context) {
 		}
 		switch ev.(type) {
 		case widget.ChangeEvent:
-			keep := uint32(0)
-			if s := u.current(); s != nil {
-				keep = s.UID
+			keep := ""
+			if c := u.current(); c != nil {
+				keep = c.key
 			}
 			u.applyFilter(keep)
 		case widget.SubmitEvent:
@@ -178,9 +193,9 @@ func (u *ui) updateList(gtx layout.Context) {
 }
 
 func (u *ui) clearFilter() {
-	keep := uint32(0)
-	if s := u.current(); s != nil {
-		keep = s.UID
+	keep := ""
+	if c := u.current(); c != nil {
+		keep = c.key
 	}
 	u.search.SetText("")
 	u.searching = false
@@ -203,16 +218,16 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 
 func (u *ui) header(gtx layout.Context) layout.Dimensions {
 	unreadCount := 0
-	for _, it := range u.items {
-		if unread(it) {
+	for _, e := range u.entries {
+		if e.FolderID == u.folder.ID && unread(e.Summary) {
 			unreadCount++
 		}
 	}
 	parts := []string{u.account.Name, u.folder.Name}
 	if u.searching && u.search.Len() > 0 {
-		parts = append(parts, fmt.Sprintf("%d of %d match", len(u.view), len(u.items)))
+		parts = append(parts, fmt.Sprintf("%d of %d conversations match", len(u.view), len(u.convs)))
 	} else {
-		parts = append(parts, fmt.Sprintf("%d messages", len(u.items)), fmt.Sprintf("%d unread", unreadCount))
+		parts = append(parts, fmt.Sprintf("%d conversations", len(u.convs)), fmt.Sprintf("%d unread", unreadCount))
 	}
 	switch {
 	case u.daemon == nil || u.down:
@@ -236,7 +251,9 @@ func (u *ui) listArea(gtx layout.Context) layout.Dimensions {
 	if len(u.view) == 0 {
 		msg := "This folder is empty."
 		if u.searching && u.search.Len() > 0 {
-			msg = "No messages match."
+			msg = "No conversations match."
+		} else if u.folder.UIDValidity == 0 {
+			msg = "This folder hasn't been synced yet."
 		}
 		layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			l := material.Label(u.th, u.th.TextSize, msg)
@@ -250,7 +267,7 @@ func (u *ui) listArea(gtx layout.Context) layout.Dimensions {
 }
 
 func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
-	s := u.items[u.view[i]]
+	c := &u.convs[u.view[i]]
 	size := image.Pt(gtx.Constraints.Max.X, u.rowH)
 	gtx.Constraints = layout.Exact(size)
 	if i == u.sel {
@@ -261,25 +278,30 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 		paint.FillShape(gtx.Ops, bg, clip.Rect{Max: size}.Op())
 	}
 	var f font.Font
-	if unread(s) {
+	if c.unread > 0 {
 		f.Weight = font.Bold
 	}
 	flags := ""
-	if unread(s) {
+	if c.unread > 0 {
 		flags += "N"
 	}
-	if flagged(s) {
+	if c.flagged {
 		flags += "!"
 	}
-	subject := s.Subject
+	count := ""
+	if len(c.members) > 1 {
+		count = fmt.Sprintf("%d", len(c.members))
+	}
+	subject := c.subject
 	if strings.TrimSpace(subject) == "" {
 		subject = "(no subject)"
 	}
 	return layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(u.cell(36, flags, font.Font{Weight: font.Bold}, u.accent)),
-			layout.Rigid(u.cell(96, shortDate(s.Date, u.now()), font.Font{}, u.muted)),
-			layout.Rigid(u.cell(230, senderName(s.From), f, u.th.Fg)),
+			layout.Rigid(u.cell(96, shortDate(c.latest, u.now()), font.Font{}, u.muted)),
+			layout.Rigid(u.cell(230, c.people, f, u.th.Fg)),
+			layout.Rigid(u.cell(36, count, font.Font{}, u.muted)),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				l := material.Label(u.th, u.th.TextSize, subject)
 				l.MaxLines, l.Font = 1, f
@@ -317,10 +339,10 @@ func (u *ui) searchBar(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// Message view
+// Conversation view
 
 func (u *ui) updateView(gtx layout.Context) {
-	m := u.msg
+	o := u.conv
 	for {
 		ev, ok := gtx.Event(
 			key.Filter{Name: key.NameEscape},
@@ -328,6 +350,8 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "I"},
 			key.Filter{Name: "J"},
 			key.Filter{Name: "K"},
+			key.Filter{Name: "N"},
+			key.Filter{Name: "P"},
 			key.Filter{Name: "H"},
 			key.Filter{Name: key.NameSpace},
 			key.Filter{Name: "-"},
@@ -352,15 +376,15 @@ func (u *ui) updateView(gtx layout.Context) {
 		page := u.viewH * 9 / 10
 		switch name := ke.Name; {
 		case len(name) == 1 && name[0] >= '0' && name[0] <= '9':
-			if len(m.linkInput) < 4 {
-				m.linkInput += string(name)
+			if len(o.linkInput) < 4 {
+				o.linkInput += string(name)
 			}
-		case name == key.NameDeleteBackward && m.linkInput != "":
-			m.linkInput = m.linkInput[:len(m.linkInput)-1]
-		case (name == key.NameReturn || name == key.NameEnter) && m.linkInput != "":
-			u.openLink(m)
-		case name == key.NameEscape && m.linkInput != "":
-			m.linkInput = ""
+		case name == key.NameDeleteBackward && o.linkInput != "":
+			o.linkInput = o.linkInput[:len(o.linkInput)-1]
+		case (name == key.NameReturn || name == key.NameEnter) && o.linkInput != "":
+			u.openLink(o)
+		case name == key.NameEscape && o.linkInput != "":
+			o.linkInput = ""
 		case name == key.NameEscape || name == "Q" || name == "I":
 			u.mode = modeList
 			u.focusReq = u.listTag
@@ -374,8 +398,16 @@ func (u *ui) updateView(gtx layout.Context) {
 				u.moveTo(u.sel - 1)
 				u.open()
 			}
+		case name == "N":
+			o.list.Position = layout.Position{First: min(o.list.Position.First+1, len(o.parts)-1)}
+		case name == "P":
+			first := o.list.Position.First
+			if o.list.Position.Offset == 0 {
+				first--
+			}
+			o.list.Position = layout.Position{First: max(first, 0)}
 		case name == "H":
-			m.showQuotes = !m.showQuotes
+			o.showQuotes = !o.showQuotes
 		case name == key.NameSpace || name == key.NamePageDown:
 			u.scrollBody(page)
 		case name == "-" || name == key.NamePageUp:
@@ -389,135 +421,149 @@ func (u *ui) updateView(gtx layout.Context) {
 }
 
 func (u *ui) scrollBody(px int) {
-	if u.msg == nil {
-		return
-	}
-	p := &u.msg.list.Position
-	p.Offset = max(0, p.Offset+px)
-	if px < 0 && p.Offset == 0 && p.First > 0 {
-		p.First--
+	if u.conv != nil {
+		// The list carries an offset past the first item over to the next
+		// items, and a negative one back to earlier items.
+		u.conv.list.Position.Offset += px
 	}
 }
 
 func (u *ui) layoutView(gtx layout.Context) layout.Dimensions {
-	m := u.msg
-	if m == nil {
+	o := u.conv
+	if o == nil {
 		u.mode = modeList
 		return layout.Dimensions{}
 	}
 	hints := viewHints
-	if m.linkInput != "" {
-		hints = fmt.Sprintf("Open link [%s] — Enter opens, Esc cancels", m.linkInput)
+	if o.linkInput != "" {
+		hints = fmt.Sprintf("Open link [%s]: Enter opens, Esc cancels", o.linkInput)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(u.messageHeader),
+		layout.Rigid(u.convHeader),
 		layout.Rigid(u.divider),
-		layout.Flexed(1, u.messageBody),
+		layout.Flexed(1, u.convBody),
 		layout.Rigid(u.statusBar(hints)),
 	)
 }
 
-func (u *ui) messageHeader(gtx layout.Context) layout.Dimensions {
-	m := u.msg
-	subject, from, rest := m.sum.Subject, m.sum.From.String(), []string{}
-	date := m.sum.Date
-	if r := m.rendered; r != nil {
-		if r.Subject != "" {
-			subject = r.Subject
-		}
-		if len(r.From) > 0 {
-			from = addressList(r.From)
-		}
-		if len(r.To) > 0 {
-			rest = append(rest, "To: "+addressList(r.To))
-		}
-		if len(r.Cc) > 0 {
-			rest = append(rest, "Cc: "+addressList(r.Cc))
-		}
-		if !r.Date.IsZero() {
-			date = r.Date
-		}
-	}
+func (u *ui) convHeader(gtx layout.Context) layout.Dimensions {
+	o := u.conv
+	subject := o.conv.subject
 	if strings.TrimSpace(subject) == "" {
 		subject = "(no subject)"
 	}
-	lines := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Label(u.th, 18, subject)
-			l.Font.Weight = font.Bold
-			return layout.Inset{Bottom: 6}.Layout(gtx, l.Layout)
-		}),
-		layout.Rigid(material.Label(u.th, u.th.TextSize, "From: "+from).Layout),
+	info := o.conv.people
+	if n := len(o.parts); n > 1 {
+		info = fmt.Sprintf("%d messages · %s", n, info)
 	}
-	for _, line := range rest {
-		lines = append(lines, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Label(u.th, u.th.TextSize, line)
-			l.MaxLines = 2
-			return l.Layout(gtx)
-		}))
-	}
-	lines = append(lines, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		l := material.Label(u.th, u.th.TextSize, date.Local().Format("Mon, 2 Jan 2006 15:04"))
-		l.Color = u.muted
-		return l.Layout(gtx)
-	}))
 	return layout.Inset{Top: 12, Bottom: 12, Left: 16, Right: 16}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, lines...)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, 18, subject)
+				l.Font.Weight = font.Bold
+				return layout.Inset{Bottom: 4}.Layout(gtx, l.Layout)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, u.th.TextSize, info)
+				l.Color = u.muted
+				return l.Layout(gtx)
+			}),
+		)
 	})
 }
 
-func (u *ui) messageBody(gtx layout.Context) layout.Dimensions {
-	m := u.msg
+func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
+	o := u.conv
 	u.viewH = gtx.Constraints.Max.Y
-	var parts []layout.Widget
-	note := func(s string) layout.Widget {
-		return func(gtx layout.Context) layout.Dimensions {
-			l := material.Label(u.th, u.th.TextSize, s)
-			l.Color = u.muted
-			return l.Layout(gtx)
-		}
-	}
-	switch {
-	case m.loading:
-		parts = append(parts, note("Loading…"))
-	case m.err != nil:
-		parts = append(parts, note("Couldn't show this message: "+m.err.Error()))
-	default:
-		r := m.rendered
-		text := bodyText(r, m.showQuotes)
-		if r.Source == render.SourceNone {
-			text = "(This message has no text.)"
-		}
-		parts = append(parts, func(gtx layout.Context) layout.Dimensions {
-			l := material.Label(u.th, u.th.TextSize, text)
-			l.State, l.Font = &m.body, u.mono
-			return l.Layout(gtx)
-		})
-		if r.Source == render.SourceHTML {
-			parts = append(parts, note("Converted from HTML."))
-		}
-		// Room for the link list: about as many characters as fit the width.
-		width := max(40, gtx.Constraints.Max.X/max(1, gtx.Sp(u.th.TextSize)*6/10))
-		if links := linkLines(r.Links, width); len(links) > 0 {
-			parts = append(parts, u.section("Links", links))
-		}
-		if atts := attachmentLines(r.Attachments); len(atts) > 0 {
-			parts = append(parts, u.section("Attachments", atts))
-		}
-	}
-	return material.List(u.th, &m.list).Layout(gtx, len(parts), func(gtx layout.Context, i int) layout.Dimensions {
-		return layout.Inset{Top: 12, Bottom: 4, Left: 16, Right: 16}.Layout(gtx, parts[i])
+	width := max(40, gtx.Constraints.Max.X/max(1, gtx.Sp(u.th.TextSize)*6/10))
+	return material.List(u.th, &o.list).Layout(gtx, len(o.parts), func(gtx layout.Context, i int) layout.Dimensions {
+		return layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
 	})
+}
+
+// partWidget draws one message of a conversation: who and when, the body,
+// then its links and attachments.
+func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		e := p.entry
+		who := senderName(e.From)
+		if r := p.rendered; r != nil && len(r.From) > 0 {
+			who = addressList(r.From)
+		}
+		meta := e.Date.Local().Format("Mon, 2 Jan 2006 15:04")
+		if e.FolderID != u.folder.ID {
+			meta += " · sent"
+		}
+		var rows []layout.FlexChild
+		if i > 0 {
+			rows = append(rows, layout.Rigid(u.divider))
+		}
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						l := material.Label(u.th, u.th.TextSize, who)
+						l.Font.Weight, l.MaxLines = font.Bold, 1
+						return l.Layout(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						l := material.Label(u.th, u.th.TextSize*0.9, meta)
+						l.Color = u.muted
+						return l.Layout(gtx)
+					}),
+				)
+			})
+		}))
+		note := func(s string) layout.FlexChild {
+			return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, u.th.TextSize, s)
+				l.Color = u.muted
+				return l.Layout(gtx)
+			})
+		}
+		switch {
+		case p.loading:
+			rows = append(rows, note("Loading…"))
+		case p.err != nil:
+			rows = append(rows, note("Couldn't show this message: "+p.err.Error()))
+		default:
+			r := p.rendered
+			text := bodyText(r, o.showQuotes)
+			if r.Source == render.SourceNone {
+				text = "(This message has no text.)"
+			}
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, u.th.TextSize, text)
+				l.State, l.Font = &p.body, u.mono
+				return l.Layout(gtx)
+			}))
+			if r.Source == render.SourceHTML {
+				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: 6}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						l := material.Label(u.th, u.th.TextSize*0.85, "Converted from HTML.")
+						l.Color = u.muted
+						return l.Layout(gtx)
+					})
+				}))
+			}
+			if links := linkLines(r.Links, width); len(links) > 0 {
+				rows = append(rows, layout.Rigid(u.section("Links", links)))
+			}
+			if atts := attachmentLines(r.Attachments); len(atts) > 0 {
+				rows = append(rows, layout.Rigid(u.section("Attachments", atts)))
+			}
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+	}
 }
 
 func (u *ui) section(title string, lines []string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
-			layout.Rigid(u.divider),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				l := material.Label(u.th, u.th.TextSize*0.9, title)
 				l.Color, l.Font.Weight = u.muted, font.Bold
-				return layout.Inset{Top: 8, Bottom: 4}.Layout(gtx, l.Layout)
+				return layout.Inset{Top: 10, Bottom: 4}.Layout(gtx, l.Layout)
 			}),
 		}
 		for _, line := range lines {
