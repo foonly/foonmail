@@ -18,11 +18,14 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/godbus/dbus/v5"
 	"github.com/zalando/go-keyring"
 
 	"foonmail/internal/cache"
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
+	"foonmail/internal/notify"
+	"foonmail/internal/tray"
 )
 
 func main() {
@@ -77,6 +80,15 @@ func run(configPath string, log *slog.Logger) error {
 	waker := &imapsync.Waker{}
 	go waker.Watch(ctx, log)
 
+	h, err := newHub(ctx, cfg, db, nil, nil, log)
+	if err != nil {
+		return err
+	}
+	if closeDesktop := connectDesktop(h, log); closeDesktop != nil {
+		defer closeDesktop()
+	}
+	go h.run(ctx)
+
 	var wg sync.WaitGroup
 	for i := range cfg.Accounts {
 		acct := &cfg.Accounts[i]
@@ -85,7 +97,7 @@ func run(configPath string, log *slog.Logger) error {
 			DB:       db,
 			Log:      log,
 			Password: password,
-			Notify:   newEventHandler(acct, log),
+			Notify:   h.notify,
 		})
 		if err != nil {
 			return fmt.Errorf("account %s: %w", acct.Name, err)
@@ -101,6 +113,42 @@ func run(configPath string, log *slog.Logger) error {
 	log.Info("shutting down")
 	wg.Wait()
 	return nil
+}
+
+// connectDesktop attaches the tray icon and notifications to the hub. The
+// daemon still syncs without them, for example on a desktop with no tray.
+// It must run before h.run starts.
+func connectDesktop(h *hub, log *slog.Logger) (closeDesktop func()) {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		log.Warn("no session bus: running without tray and notifications", "err", err)
+		return nil
+	}
+	if n, err := notify.New(conn); err != nil {
+		log.Warn("no notification server: running without notifications", "err", err)
+	} else {
+		srv := n.Server()
+		log.Info("notification server", "name", srv.Name, "version", srv.Version,
+			"actions", srv.Has("actions"), "capabilities", srv.Capabilities)
+		if !srv.Has("actions") {
+			log.Warn("the notification server has no action buttons: clicking notifications " +
+				"won't open mail, and undo send will need another way")
+		}
+		h.notifier = n
+	}
+	t, err := tray.New(conn, "foonmail", tray.State{Status: tray.Active, IconName: "mail-read", Tooltip: "foonmail"},
+		h.activate, log)
+	if err != nil {
+		log.Warn("no tray icon", "err", err)
+	} else {
+		h.tray = t
+	}
+	return func() {
+		if t != nil {
+			t.Close()
+		}
+		conn.Close()
+	}
 }
 
 // password reads a server's password from the Secret Service keyring.
