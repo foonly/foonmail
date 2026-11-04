@@ -157,6 +157,21 @@ func (d *DB) Folders(ctx context.Context, accountID int64) ([]Folder, error) {
 	return out, rows.Err()
 }
 
+// DeleteFolder forgets a folder that no longer exists on the server.
+// Messages left in no folder are deleted.
+func (d *DB) DeleteFolder(ctx context.Context, folderID int64) error {
+	return d.tx(ctx, func(tx *sql.Tx) error {
+		ids, err := queryIDs(ctx, tx, `SELECT DISTINCT message_id FROM locations WHERE folder_id = ?`, folderID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM folders WHERE id = ?`, folderID); err != nil {
+			return err
+		}
+		return deleteOrphans(ctx, tx, ids)
+	})
+}
+
 // SetFolderInfo records the hierarchy delimiter and special-use attribute
 // from LIST.
 func (d *DB) SetFolderInfo(ctx context.Context, folderID int64, delimiter, specialUse string) error {
@@ -398,6 +413,36 @@ func (d *DB) Raw(ctx context.Context, messageID int64) ([]byte, error) {
 	var raw []byte
 	err := d.db.QueryRowContext(ctx, `SELECT raw FROM messages WHERE id = ?`, messageID).Scan(&raw)
 	return raw, err
+}
+
+// Header is the stored header information of one message.
+type Header struct {
+	MessageID  string
+	Subject    string
+	From       Address
+	To, Cc     string // formatted lists, as shown
+	Date       time.Time
+	InReplyTo  string
+	References []string
+	Size       int64
+}
+
+// Header returns a message's stored header information.
+func (d *DB) Header(ctx context.Context, messageID int64) (Header, error) {
+	var h Header
+	var date int64
+	var refs string
+	err := d.db.QueryRowContext(ctx, `
+		SELECT message_id, subject, from_name, from_addr, to_list, cc_list, date, in_reply_to, refs, size
+		FROM messages WHERE id = ?`, messageID).Scan(
+		&h.MessageID, &h.Subject, &h.From.Name, &h.From.Addr, &h.To, &h.Cc, &date, &h.InReplyTo, &refs, &h.Size)
+	if date != 0 {
+		h.Date = time.Unix(date, 0)
+	}
+	if refs != "" {
+		h.References = strings.Split(refs, " ")
+	}
+	return h, err
 }
 
 // Listing and search

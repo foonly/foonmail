@@ -235,6 +235,27 @@ func TestResetFolderOnUIDValidityChange(t *testing.T) {
 	}
 }
 
+func TestDeleteFolder(t *testing.T) {
+	f := newFixture(t)
+	shared := msg(1, "shared@x", "In both", "Bob Example")
+	if err := f.db.AddMessages(ctx, f.inbox.ID, []NewMessage{shared}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.AddMessages(ctx, f.archive.ID, []NewMessage{shared, msg(2, "only@x", "Only here", "Bob Example")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.DeleteFolder(ctx, f.archive.ID); err != nil {
+		t.Fatal(err)
+	}
+	folders := get(f.db.Folders(ctx, f.account))
+	if len(folders) != 1 || folders[0].Name != "INBOX" {
+		t.Errorf("folders = %+v", folders)
+	}
+	if f.count("messages") != 1 || f.count("locations") != 1 {
+		t.Errorf("%d messages, %d locations; want only the INBOX copy left", f.count("messages"), f.count("locations"))
+	}
+}
+
 func TestSearch(t *testing.T) {
 	f := newFixture(t)
 	if err := f.db.AddMessages(ctx, f.inbox.ID, []NewMessage{
