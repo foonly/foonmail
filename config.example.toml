@@ -1,0 +1,44 @@
+# foonmail configuration.
+# Copy to ~/.config/foonmail/config.toml (or set FOONMAIL_CONFIG).
+#
+# Passwords are not stored here. Put each one in the Secret Service keyring:
+#
+#   secret-tool store --label='foonmail: LOGIN on HOST' service foonmail/HOST username LOGIN
+#
+# Unknown settings are reported as errors, so typos don't go unnoticed.
+
+# Where the mail cache lives. Default: ~/.cache/foonmail
+# cache_dir = "~/.cache/foonmail"
+
+[[account]]
+name = "uplink"                      # short id: a-z, 0-9, _ and -
+email = "you@example.com"            # primary address
+display_name = "Your Name"
+aliases = ["postmaster@example.com"] # other addresses that are you
+
+# Copy sent mail to the Sent folder. Set to false for Gmail, which does it itself.
+# append_sent = true
+
+# Show sender and subject in new-mail notifications.
+# notify_details = true
+
+[account.imap]
+host = "mail.example.com"
+username = "you"
+# security = "tls"        # "tls" (implicit TLS) or "starttls"
+# port = 993              # default: 993 for tls, 143 for starttls
+
+[account.smtp]
+# host and username default to the IMAP ones.
+# host = "mail.example.com"
+# username = "you"
+# security = "tls"
+# port = 465              # default: 465 for tls, 587 for starttls
+
+[account.folders]
+# INBOX is always watched live and is the only folder that alerts.
+# Watched folders are polled in the background; everything else syncs
+# when you open it. "@sent", "@drafts", "@trash", "@junk" and "@archive"
+# refer to folders by their special-use flag instead of their name.
+# watched = ["@sent"]
+# poll_interval = "5m"
