@@ -169,12 +169,11 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 		return nil
 	}
 
-	s.log.Debug("applying server updates", "count", len(batch))
 	for _, ev := range batch {
-		s.log.Debug("server update", "kind", ev.kind, "n", ev.n, "known", len(l.uids))
 		switch ev.kind {
 		case evExists:
 			exists = int(ev.n)
+			s.log.Debug("server: EXISTS", "count", ev.n, "known", len(l.uids))
 		case evExpunge:
 			if ev.n == 0 || int(ev.n) > len(l.uids) {
 				s.log.Warn("EXPUNGE for unknown sequence number", "seq", ev.n)
@@ -183,6 +182,7 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 			uid := l.uids[ev.n-1]
 			l.uids = slices.Delete(l.uids, int(ev.n-1), int(ev.n))
 			removed = append(removed, uid)
+			s.log.Debug("server: EXPUNGE", "seq", ev.n, "uid", uid)
 		case evFetch:
 			f := ev.fetch
 			uid := uint32(f.UID)
@@ -196,6 +196,7 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 			if f.Flags != nil {
 				flagUpdates = append(flagUpdates, cache.FlagUpdate{UID: uid, Flags: flagStrings(f.Flags), ModSeq: f.ModSeq})
 			}
+			s.log.Debug("server: FETCH", "seq", f.SeqNum, "uid", uid, "flags", flagStrings(f.Flags), "modseq", f.ModSeq)
 			l.modseq = max(l.modseq, f.ModSeq)
 		}
 	}
@@ -207,9 +208,6 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 	}
 	if err := s.db.RemoveUIDs(ctx, l.folder.ID, removed); err != nil {
 		return err
-	}
-	for _, uid := range removed {
-		s.log.Debug("expunged", "uid", uid)
 	}
 
 	if exists > len(l.uids) {
