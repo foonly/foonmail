@@ -1,0 +1,5 @@
+# Build output
+/compose-proto
+/list-proto
+/imap-probe
+*.test
