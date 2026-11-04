@@ -177,7 +177,7 @@ func describe(m *render.Message) string {
 	if len(m.Links) > 0 {
 		b.WriteString("\n" + strings.Repeat("─", 72) + "\n")
 		for _, l := range m.Links {
-			fmt.Fprintf(&b, "[%d] %s\n", l.N, render.ShortURL(l.URL, 70))
+			fmt.Fprintf(&b, "[%d] %s\n", l.N, render.ShortLink(l.URL, 70))
 		}
 	}
 	if len(m.Attachments) > 0 {
