@@ -94,6 +94,45 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	}
 }
 
+func TestOpenReadOnly(t *testing.T) {
+	f := newFixture(t)
+	if err := f.db.AddMessages(ctx, f.inbox.ID, []NewMessage{msg(1, "a@x", "Hello", "Bob Example")}); err != nil {
+		t.Fatal(err)
+	}
+	ro, err := OpenReadOnly(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	if id := get(ro.AccountID(ctx, "uplink")); id != f.account {
+		t.Errorf("AccountID = %d", id)
+	}
+	if list := get(ro.List(ctx, f.inbox.ID, 10, 0)); len(list) != 1 || list[0].Subject != "Hello" {
+		t.Errorf("read-only List = %+v", list)
+	}
+	// The daemon's writes show up for the reader.
+	if err := f.db.AddMessages(ctx, f.inbox.ID, []NewMessage{msg(2, "b@x", "Later", "Bob Example")}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(get(ro.UIDs(ctx, f.inbox.ID))); n != 2 {
+		t.Errorf("reader sees %d messages after a write, want 2", n)
+	}
+	if _, err := ro.EnsureAccount(ctx, "other"); err == nil {
+		t.Error("a read-only cache accepted a write")
+	}
+	if _, err := ro.AccountID(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown account: err = %v", err)
+	}
+
+	if _, err := OpenReadOnly(filepath.Join(t.TempDir(), "none.db")); !errors.Is(err, ErrNoCache) {
+		t.Errorf("missing cache: err = %v", err)
+	}
+	f.db.db.Exec("PRAGMA user_version = 999")
+	if _, err := OpenReadOnly(f.path); !errors.Is(err, ErrNoCache) {
+		t.Errorf("other schema version: err = %v", err)
+	}
+}
+
 func TestRefusesNewerSchema(t *testing.T) {
 	f := newFixture(t)
 	f.db.db.Exec("PRAGMA user_version = 999")

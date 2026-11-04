@@ -50,6 +50,39 @@ func Open(path string) (*DB, error) {
 	return d, nil
 }
 
+// ErrNoCache means the cache doesn't exist yet or was made by a different
+// version of foonmail; the daemon creates and upgrades it.
+var ErrNoCache = errors.New("no usable mail cache; start foonmaild")
+
+// OpenReadOnly opens an existing cache for reading, as the GUI does. The
+// daemon is the only writer.
+func OpenReadOnly(path string) (*DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNoCache, err)
+	}
+	sqldb, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	var version int
+	if err := sqldb.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("cache %s: %w", path, err)
+	}
+	if version != len(migrations) {
+		sqldb.Close()
+		return nil, fmt.Errorf("%w: cache schema is version %d, this foonmail expects %d", ErrNoCache, version, len(migrations))
+	}
+	return &DB{db: sqldb}, nil
+}
+
+// AccountID returns the id of an account without creating it.
+func (d *DB) AccountID(ctx context.Context, name string) (int64, error) {
+	var id int64
+	err := d.db.QueryRowContext(ctx, `SELECT id FROM accounts WHERE name = ?`, name).Scan(&id)
+	return id, err
+}
+
 // Close closes the database.
 func (d *DB) Close() error { return d.db.Close() }
 
