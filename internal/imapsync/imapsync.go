@@ -94,6 +94,8 @@ type Syncer struct {
 	mu               sync.Mutex
 	baselineValidity uint32 // UIDVALIDITY the baseline belongs to
 	baselineUID      uint32 // INBOX UIDs below this were there at start; see setBaseline
+
+	requests chan request // served by the folder connection
 }
 
 // New prepares a Syncer for an account.
@@ -117,6 +119,7 @@ func New(ctx context.Context, opts Options) (*Syncer, error) {
 		db:        opts.DB,
 		log:       opts.Log.With("account", opts.Account.Name),
 		accountID: id,
+		requests:  make(chan request),
 	}, nil
 }
 
@@ -127,17 +130,19 @@ func (s *Syncer) Run(ctx context.Context, inboxWake, folderWake <-chan struct{})
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		s.loop(ctx, "inbox", inboxWake, s.inboxSession)
+		s.loop(ctx, "inbox", inboxWake, nil, s.inboxSession)
 	}()
 	go func() {
 		defer wg.Done()
-		s.loop(ctx, "folders", folderWake, s.folderSession)
+		s.loop(ctx, "folders", folderWake, s.requests, s.folderSession)
 	}()
 	wg.Wait()
 }
 
 // loop runs session until ctx is cancelled, reconnecting with backoff.
-func (s *Syncer) loop(ctx context.Context, name string, wake <-chan struct{},
+// serve, if not nil, receives requests to answer with ErrOffline while the
+// connection is down.
+func (s *Syncer) loop(ctx context.Context, name string, wake <-chan struct{}, serve <-chan request,
 	session func(context.Context, <-chan struct{}) error) {
 	log := s.log.With("conn", name)
 	backoff := time.Second
@@ -159,11 +164,22 @@ func (s *Syncer) loop(ctx context.Context, name string, wake <-chan struct{},
 			continue
 		}
 		log.Warn("disconnected", "err", err, "retry_in", backoff)
-		select {
-		case <-time.After(backoff):
-		case <-wake:
-		case <-ctx.Done():
-			return
+		// While waiting, answer requests at once instead of leaving them hanging.
+		retry := time.NewTimer(backoff)
+	wait:
+		for {
+			select {
+			case <-retry.C:
+				break wait
+			case <-wake:
+				retry.Stop()
+				break wait
+			case req := <-serve:
+				req.reply <- reqResult{err: fmt.Errorf("%w: %v", ErrOffline, err)}
+			case <-ctx.Done():
+				retry.Stop()
+				return
+			}
 		}
 		backoff = min(backoff*2, maxBackoff)
 	}

@@ -2,6 +2,7 @@ package imapsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -456,5 +457,149 @@ func TestNotifyOnlyAboveBaseline(t *testing.T) {
 	s.notifyNew([]cache.NewMessage{{UID: 1}, {UID: 3}})
 	if !slices.Equal(got, []uint32{3}) {
 		t.Errorf("after UIDVALIDITY change notified %v, want [3]", got)
+	}
+}
+
+func (e *env) folderChangedFor(id int64) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, ev := range e.events {
+		if fc, ok := ev.(FolderChanged); ok && fc.FolderID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *env) serverFlags(mailbox string, uid uint32) []imap.Flag {
+	e.t.Helper()
+	e.phoneSelect(mailbox)
+	msgs, err := e.phone.Fetch(imap.UIDSetNum(imap.UID(uid)), &imap.FetchOptions{Flags: true, UID: true}).Collect()
+	if err != nil || len(msgs) != 1 {
+		e.t.Fatalf("fetch flags: %v %v", msgs, err)
+	}
+	return msgs[0].Flags
+}
+
+func reqCtx(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func TestSyncFolderOnRequest(t *testing.T) {
+	e := newEnv(t, "Sent", "Archive")
+	e.appendTo("Archive", "old one")
+	e.appendTo("Archive", "old two")
+	e.start()
+	defer e.stop()
+	e.eventually("Archive listed", func() bool { _, ok := e.folder("Archive"); return ok })
+	if n := len(e.uids("Archive")); n != 0 {
+		t.Fatalf("an unwatched folder was synced on its own: %d messages", n)
+	}
+	archive, _ := e.folder("Archive")
+	if err := e.syncer.SyncFolder(reqCtx(t), archive.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.uids("Archive"); !slices.Equal(got, []uint32{1, 2}) {
+		t.Errorf("Archive after SyncFolder = %v", got)
+	}
+	if !e.folderChangedFor(archive.ID) {
+		t.Error("no FolderChanged event for the synced folder")
+	}
+}
+
+func TestFetchBody(t *testing.T) {
+	e := newEnv(t)
+	e.appendTo("INBOX", "with a body")
+	e.start()
+	e.eventually("synced", func() bool { return len(e.uids("INBOX")) == 1 })
+	inbox, _ := e.folder("INBOX")
+
+	id, err := e.syncer.FetchBody(reqCtx(t), inbox.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := e.db.Raw(context.Background(), id)
+	if err != nil || !strings.Contains(string(raw), "Subject: with a body") {
+		t.Fatalf("raw = %q, %v", raw, err)
+	}
+	if slices.Contains(e.serverFlags("INBOX", 1), imap.FlagSeen) {
+		t.Error("fetching the body marked the message read on the server")
+	}
+
+	// A message the cache hasn't seen yet is synced first.
+	e.appendTo("INBOX", "brand new")
+	id2, err := e.syncer.FetchBody(reqCtx(t), inbox.ID, 2)
+	if err != nil || id2 == id {
+		t.Errorf("FetchBody of a new message: %d, %v", id2, err)
+	}
+	if _, err := e.syncer.FetchBody(reqCtx(t), inbox.ID, 99); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown UID: err = %v", err)
+	}
+
+	// Offline, a fetched body comes from the cache.
+	e.stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if got, err := e.syncer.FetchBody(ctx, inbox.ID, 1); err != nil || got != id {
+		t.Errorf("cached FetchBody while stopped = %d, %v", got, err)
+	}
+	e.start()
+	defer e.stop()
+}
+
+func TestSetFlags(t *testing.T) {
+	e := newEnv(t)
+	e.appendTo("INBOX", "a")
+	e.appendTo("INBOX", "b")
+	e.start()
+	defer e.stop()
+	e.eventually("synced", func() bool { return len(e.uids("INBOX")) == 2 })
+	inbox, _ := e.folder("INBOX")
+
+	if err := e.syncer.SetFlags(reqCtx(t), inbox.ID, []uint32{1, 2}, []string{`\Seen`, `\Flagged`}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if f := e.serverFlags("INBOX", 2); !slices.Contains(f, imap.FlagSeen) || !slices.Contains(f, imap.FlagFlagged) {
+		t.Errorf("server flags = %v", f)
+	}
+	flags, _ := e.db.Flags(context.Background(), inbox.ID)
+	if !slices.Equal(flags[1], []string{`\Flagged`, `\Seen`}) {
+		t.Errorf("cache flags = %v", flags[1])
+	}
+
+	if err := e.syncer.SetFlags(reqCtx(t), inbox.ID, []uint32{1}, nil, []string{`\Seen`}); err != nil {
+		t.Fatal(err)
+	}
+	if f := e.serverFlags("INBOX", 1); slices.Contains(f, imap.FlagSeen) {
+		t.Errorf("\\Seen not removed on the server: %v", f)
+	}
+	e.eventually("unread count after marking unread", func() bool { return e.lastUnread() == 1 })
+
+	if err := e.syncer.SetFlags(reqCtx(t), 9999, []uint32{1}, []string{`\Seen`}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown folder: err = %v", err)
+	}
+}
+
+func TestRequestsWhileOffline(t *testing.T) {
+	e := newEnv(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.addr = ln.Addr().String()
+	ln.Close() // nothing listens here any more
+	e.syncer = e.newSyncer()
+	e.start()
+	defer e.stop()
+
+	start := time.Now()
+	err = e.syncer.SyncFolder(reqCtx(t), 1)
+	if !errors.Is(err, ErrOffline) {
+		t.Errorf("err = %v, want ErrOffline", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("offline answer took %s", time.Since(start))
 	}
 }

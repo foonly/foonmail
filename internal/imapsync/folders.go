@@ -3,6 +3,7 @@ package imapsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -19,8 +20,9 @@ var specialUseAttrs = []imap.MailboxAttr{
 	imap.MailboxAttrArchive, imap.MailboxAttrAll, imap.MailboxAttrFlagged,
 }
 
-// folderSession keeps the folder list current and syncs watched folders
-// whenever STATUS shows they changed.
+// folderSession keeps the folder list current, syncs watched folders
+// whenever STATUS shows they changed, and serves requests from the GUI
+// between polls.
 func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error {
 	c, err := s.connect(nil)
 	if err != nil {
@@ -29,20 +31,30 @@ func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error 
 	defer c.Close()
 	condstore := c.Caps().Has(imap.CapCondStore)
 
-	interval := s.acct.Folders.PollInterval
+	poll := time.NewTimer(0)
+	defer poll.Stop()
 	for {
-		folders, err := s.refreshFolders(ctx, c)
-		if err != nil {
-			return err
-		}
-		for _, f := range s.resolveWatched(folders) {
-			if err := s.pollFolder(ctx, c, f, condstore); err != nil {
+		select {
+		case <-poll.C:
+			folders, err := s.refreshFolders(ctx, c)
+			if err != nil {
 				return err
 			}
-		}
-
-		select {
-		case <-time.After(interval):
+			for _, f := range s.resolveWatched(folders) {
+				if err := s.pollFolder(ctx, c, f, condstore); err != nil {
+					return err
+				}
+			}
+			poll.Reset(s.acct.Folders.PollInterval)
+		case req := <-s.requests:
+			res := s.handleRequest(ctx, c, req, condstore)
+			req.reply <- res
+			select {
+			case <-c.Closed():
+				// The request failed because the connection did.
+				return fmt.Errorf("connection lost: %w", res.err)
+			default:
+			}
 		case <-wake:
 			return errResumed
 		case <-c.Closed():
@@ -182,5 +194,6 @@ func (s *Syncer) pollFolder(ctx context.Context, c *imapclient.Client, f cache.F
 	}
 	s.log.Info("folder synced", "folder", f.Name, "messages", len(res.uids), "new", len(res.added),
 		"gone", len(res.removed), "flag_changes", res.flagChanges, "ms", since(start), "method", res.method)
+	s.notifyFolder(f.ID, res)
 	return nil
 }

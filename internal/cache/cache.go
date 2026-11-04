@@ -138,6 +138,20 @@ func (d *DB) EnsureFolder(ctx context.Context, accountID int64, name string) (Fo
 		`SELECT `+folderColumns+` FROM folders WHERE account_id = ? AND name = ?`, accountID, name))
 }
 
+// FolderByID returns a folder by its id.
+func (d *DB) FolderByID(ctx context.Context, id int64) (Folder, error) {
+	return scanFolder(d.db.QueryRowContext(ctx, `SELECT `+folderColumns+` FROM folders WHERE id = ?`, id))
+}
+
+// Location returns the id of the message at a folder and UID, or
+// sql.ErrNoRows if the cache doesn't have it.
+func (d *DB) Location(ctx context.Context, folderID int64, uid uint32) (int64, error) {
+	var id int64
+	err := d.db.QueryRowContext(ctx,
+		`SELECT message_id FROM locations WHERE folder_id = ? AND uid = ?`, folderID, uid).Scan(&id)
+	return id, err
+}
+
 // Folders lists an account's folders by name.
 func (d *DB) Folders(ctx context.Context, accountID int64) ([]Folder, error) {
 	rows, err := d.db.QueryContext(ctx,

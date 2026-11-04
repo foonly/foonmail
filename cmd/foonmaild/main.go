@@ -84,12 +84,8 @@ func run(configPath string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if closeDesktop := connectDesktop(h, log); closeDesktop != nil {
-		defer closeDesktop()
-	}
-	go h.run(ctx)
-
-	var wg sync.WaitGroup
+	var syncers []*imapsync.Syncer
+	backends := map[int64]backend{}
 	for i := range cfg.Accounts {
 		acct := &cfg.Accounts[i]
 		s, err := imapsync.New(ctx, imapsync.Options{
@@ -102,6 +98,28 @@ func run(configPath string, log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("account %s: %w", acct.Name, err)
 		}
+		syncers = append(syncers, s)
+		backends[s.AccountID()] = s
+	}
+
+	// The session bus carries the tray, notifications and the GUI's
+	// interface. Without it the daemon still syncs.
+	if conn, err := dbus.ConnectSessionBus(); err != nil {
+		log.Warn("no session bus: running without tray, notifications and GUI interface", "err", err)
+	} else {
+		defer conn.Close()
+		closeDesktop := connectDesktop(h, conn, log)
+		defer closeDesktop()
+		svc, err := exportService(conn, db, backends, h, log)
+		if err != nil {
+			return err
+		}
+		h.signals = svc
+	}
+	go h.run(ctx)
+
+	var wg sync.WaitGroup
+	for _, s := range syncers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -118,12 +136,7 @@ func run(configPath string, log *slog.Logger) error {
 // connectDesktop attaches the tray icon and notifications to the hub. The
 // daemon still syncs without them, for example on a desktop with no tray.
 // It must run before h.run starts.
-func connectDesktop(h *hub, log *slog.Logger) (closeDesktop func()) {
-	conn, err := dbus.ConnectSessionBus()
-	if err != nil {
-		log.Warn("no session bus: running without tray and notifications", "err", err)
-		return nil
-	}
+func connectDesktop(h *hub, conn *dbus.Conn, log *slog.Logger) (closeDesktop func()) {
 	if n, err := notify.New(conn); err != nil {
 		log.Warn("no notification server: running without notifications", "err", err)
 	} else {
@@ -147,7 +160,6 @@ func connectDesktop(h *hub, log *slog.Logger) (closeDesktop func()) {
 		if t != nil {
 			t.Close()
 		}
-		conn.Close()
 	}
 }
 

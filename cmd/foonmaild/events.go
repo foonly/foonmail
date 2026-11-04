@@ -12,6 +12,7 @@ import (
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
 	"foonmail/internal/notify"
+	"foonmail/internal/rpc"
 	"foonmail/internal/tray"
 )
 
@@ -66,6 +67,7 @@ type hub struct {
 	db       *cache.DB
 	notifier notifier
 	tray     trayIcon
+	signals  emitter // nil until the D-Bus service is up
 	delay    time.Duration
 
 	order    []string
@@ -76,16 +78,20 @@ type hub struct {
 	opens   chan openRequest
 	closed  chan uint32 // a summary notification was closed
 	flushAt <-chan time.Time
+
+	statusReq  chan chan []rpc.AccountStatus
+	lastStatus []rpc.AccountStatus
 }
 
 func newHub(ctx context.Context, cfg *config.Config, db *cache.DB, n notifier, t trayIcon, log *slog.Logger) (*hub, error) {
 	h := &hub{
 		log: log, db: db, notifier: n, tray: t, delay: burstDelay,
-		accounts: map[string]*accountState{},
-		newMail:  map[mailKey]bool{},
-		events:   make(chan imapsync.Event, 256),
-		opens:    make(chan openRequest, 8),
-		closed:   make(chan uint32, 8),
+		accounts:  map[string]*accountState{},
+		newMail:   map[mailKey]bool{},
+		events:    make(chan imapsync.Event, 256),
+		opens:     make(chan openRequest, 8),
+		closed:    make(chan uint32, 8),
+		statusReq: make(chan chan []rpc.AccountStatus),
 	}
 	for i := range cfg.Accounts {
 		a := &cfg.Accounts[i]
@@ -114,11 +120,73 @@ func (h *hub) activate() {
 	}
 }
 
+// emitter sends the daemon's D-Bus signals; see service.
+type emitter interface {
+	FolderChanged(folderID int64)
+	StatusChanged()
+}
+
+// status returns every account's state, for the D-Bus Status method.
+func (h *hub) status(ctx context.Context) ([]rpc.AccountStatus, error) {
+	reply := make(chan []rpc.AccountStatus, 1)
+	select {
+	case h.statusReq <- reply:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case st := <-reply:
+		return st, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (h *hub) snapshot() []rpc.AccountStatus {
+	out := make([]rpc.AccountStatus, 0, len(h.order))
+	for _, name := range h.order {
+		a := h.accounts[name]
+		st := rpc.AccountStatus{Name: name, Online: a.online, Unread: int32(a.unread)}
+		if a.err != nil {
+			st.Error = a.err.Error()
+		}
+		for k := range h.newMail {
+			if k.account == name {
+				st.New++
+			}
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// statusChanged emits StatusChanged if anything Status reports changed.
+func (h *hub) statusChanged() {
+	st := h.snapshot()
+	if slices.Equal(st, h.lastStatus) {
+		return
+	}
+	h.lastStatus = st
+	if h.signals != nil {
+		h.signals.StatusChanged()
+	}
+}
+
 func (h *hub) run(ctx context.Context) {
 	h.updateTray()
+	h.lastStatus = h.snapshot()
 	for {
 		select {
+		case reply := <-h.statusReq:
+			reply <- h.snapshot()
+			continue
 		case ev := <-h.events:
+			if fc, ok := ev.(imapsync.FolderChanged); ok {
+				if h.signals != nil {
+					h.signals.FolderChanged(fc.FolderID)
+				}
+				continue
+			}
 			h.handle(ctx, ev)
 		case <-h.flushAt:
 			h.flushAt = nil
@@ -136,6 +204,7 @@ func (h *hub) run(ctx context.Context) {
 			return
 		}
 		h.updateTray()
+		h.statusChanged()
 	}
 }
 

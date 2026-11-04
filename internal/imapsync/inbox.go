@@ -81,6 +81,7 @@ func (s *Syncer) inboxSession(ctx context.Context, wake <-chan struct{}) error {
 	s.log.Info("INBOX synced", "messages", len(res.uids), "new", len(res.added), "gone", len(res.removed),
 		"flag_changes", res.flagChanges, "ms", since(start), "method", res.method)
 	s.notifyNew(res.added)
+	s.notifyFolder(folder.ID, res)
 	s.notify(ConnectionChanged{Account: s.acct.Name, Online: true})
 	s.notifyUnread(ctx, folder.ID)
 
@@ -201,6 +202,7 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 		}
 	}
 
+	changed := len(flagUpdates) > 0 || len(removed) > 0
 	// Flags before removals, so an update for a message expunged later in
 	// the same batch is simply ignored by the cache.
 	if err := flush(); err != nil {
@@ -211,6 +213,7 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 	}
 
 	if exists > len(l.uids) {
+		changed = true
 		if err := s.fetchNew(ctx, c, l, condstore); err != nil {
 			return err
 		}
@@ -220,6 +223,9 @@ func (s *Syncer) applyEvents(ctx context.Context, c *imapclient.Client, l *live,
 
 	if err := s.db.SaveSyncState(ctx, l.folder.ID, l.folder.UIDValidity, l.modseq, l.lastUID()+1); err != nil {
 		return err
+	}
+	if changed {
+		s.notify(FolderChanged{Account: s.acct.Name, FolderID: l.folder.ID})
 	}
 	s.notifyUnread(ctx, l.folder.ID)
 	return nil

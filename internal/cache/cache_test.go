@@ -235,6 +235,27 @@ func TestResetFolderOnUIDValidityChange(t *testing.T) {
 	}
 }
 
+func TestFolderByIDAndLocation(t *testing.T) {
+	f := newFixture(t)
+	got := get(f.db.FolderByID(ctx, f.archive.ID))
+	if got.Name != "Archives.2026" || got.AccountID != f.account {
+		t.Errorf("FolderByID = %+v", got)
+	}
+	if _, err := f.db.FolderByID(ctx, 9999); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown folder: err = %v", err)
+	}
+	if err := f.db.AddMessages(ctx, f.inbox.ID, []NewMessage{msg(7, "a@x", "A", "Bob Example")}); err != nil {
+		t.Fatal(err)
+	}
+	id := get(f.db.Location(ctx, f.inbox.ID, 7))
+	if h := get(f.db.Header(ctx, id)); h.Subject != "A" {
+		t.Errorf("Location points at %+v", h)
+	}
+	if _, err := f.db.Location(ctx, f.inbox.ID, 8); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown UID: err = %v", err)
+	}
+}
+
 func TestDeleteFolder(t *testing.T) {
 	f := newFixture(t)
 	shared := msg(1, "shared@x", "In both", "Bob Example")
