@@ -46,7 +46,7 @@ type Notification struct {
 	// Timeout: 0 is the server's default, negative never expires.
 	Timeout time.Duration
 
-	OnAction func(key string)    // called from the signal goroutine
+	OnAction func(key string)        // called from the signal goroutine
 	OnClosed func(id, reason uint32) // called from the signal goroutine
 }
 
