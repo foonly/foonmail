@@ -48,8 +48,11 @@ func paneLabels(h *harness) []string {
 	var out []string
 	for _, r := range h.u.pane.rows {
 		l := r.label
-		if r.header {
+		switch {
+		case r.header:
 			l = "#" + l
+		case r.other:
+			l = fmt.Sprintf("+%s(%d)", l, r.counts.Unread)
 		}
 		out = append(out, l)
 	}
@@ -61,38 +64,39 @@ func TestSeveralAccounts(t *testing.T) {
 	work := addSecondAccount(t, h)
 	home := h.u.accounts[0]
 
+	// The shown account's folders, and the other account on one line with
+	// its unread mail.
 	h.press("C")
-	if got, want := strings.Join(paneLabels(h), " "), "#home INBOX Sent Archive #work INBOX"; got != want {
+	if got, want := strings.Join(paneLabels(h), " "), "#home INBOX Sent Archive +work(1)"; got != want {
 		t.Fatalf("pane rows:\n got %s\nwant %s", got, want)
 	}
 	if r := h.u.pane.rows[h.u.pane.sel]; r.header || r.folder.ID != home.inbox.ID {
 		t.Errorf("selected %+v, want home's INBOX", r)
 	}
 
-	// Moving down passes over the account's name into its folders, and the
-	// preview switches account.
+	// Moving onto the other account switches to it and unfolds its folders.
 	h.press("J")
 	h.press("J")
 	h.press("J")
+	if got, want := strings.Join(paneLabels(h), " "), "+home(1) #work INBOX"; got != want {
+		t.Fatalf("after moving onto work:\n got %s\nwant %s", got, want)
+	}
 	if r := h.u.pane.rows[h.u.pane.sel]; r.folder.ID != work.inbox.ID || h.u.accountID != work.id {
-		t.Fatalf("after three j: %+v, account %d", r, h.u.accountID)
+		t.Fatalf("selected %+v, account %d", r, h.u.accountID)
 	}
 	if h.u.current() == nil || h.u.current().subject != "Quarterly report" {
 		t.Errorf("work's INBOX isn't shown")
 	}
-	// Up passes over it the other way; End and Home land on folders.
+	// Up passes over work's name to home, which unfolds again.
 	h.press("K")
-	if r := h.u.pane.rows[h.u.pane.sel]; r.header || r.label != "Archive" {
-		t.Errorf("k from work's INBOX: %+v", r)
+	if got := strings.Join(paneLabels(h), " "); got != "#home INBOX Sent Archive +work(1)" || h.u.accountID != home.id {
+		t.Errorf("k from work's INBOX: %s, account %d", got, h.u.accountID)
 	}
-	h.press(key.NameHome)
-	if h.u.pane.sel != 1 {
-		t.Errorf("Home selected row %d", h.u.pane.sel)
+	if r := h.u.pane.rows[h.u.pane.sel]; r.folder.ID != home.inbox.ID {
+		t.Errorf("selected %+v", r)
 	}
 	// Esc goes back to where the pane opened, account and all.
-	h.press("J")
-	h.press("J")
-	h.press("J")
+	h.press(key.NameEnd)
 	h.press(key.NameEscape)
 	if h.u.accountID != home.id || h.u.folder.ID != home.inbox.ID {
 		t.Errorf("Esc: account %d folder %d", h.u.accountID, h.u.folder.ID)
@@ -126,6 +130,28 @@ func TestSeveralAccounts(t *testing.T) {
 	h.daemon.mu.Unlock()
 	if fmt.Sprint(via) != "[work home]" {
 		t.Errorf("sent via %v", via)
+	}
+}
+
+func TestTabSwitchesAccount(t *testing.T) {
+	h := newHarness(t)
+	work := addSecondAccount(t, h)
+	home := h.u.accounts[0]
+	h.u.reload()
+	if h.u.inboxUnread[work.id] != 1 || h.u.inboxUnread[home.id] != 1 {
+		t.Errorf("unread per account: %v", h.u.inboxUnread)
+	}
+	h.press(key.NameTab)
+	if h.u.accountID != work.id || h.u.folder.ID != work.inbox.ID {
+		t.Fatalf("Tab: account %d folder %d", h.u.accountID, h.u.folder.ID)
+	}
+	h.press(key.NameTab) // round to the first again
+	if h.u.accountID != home.id {
+		t.Errorf("Tab from the last account: %d", h.u.accountID)
+	}
+	h.press(key.NameTab, key.ModShift)
+	if h.u.accountID != work.id {
+		t.Errorf("Shift+Tab: %d", h.u.accountID)
 	}
 }
 
@@ -163,7 +189,7 @@ func TestAccountAddedLater(t *testing.T) {
 	inbox, _ := h.db.EnsureFolder(ctx, id, "INBOX")
 	h.db.SetFolderInfo(ctx, inbox.ID, ".", "")
 	h.press("C")
-	if got := strings.Join(paneLabels(h), " "); got != "#home INBOX Sent Archive #late INBOX" || len(h.u.missing) != 0 {
+	if got := strings.Join(paneLabels(h), " "); got != "#home INBOX Sent Archive +late(0)" || len(h.u.missing) != 0 {
 		t.Errorf("after: %s (missing %d)", got, len(h.u.missing))
 	}
 }

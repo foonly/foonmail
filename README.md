@@ -20,8 +20,9 @@ There is also **foonmailctl**, a command-line tool for the daemon.
 
 - Several IMAP/SMTP accounts, with passwords kept in the Secret Service
   keyring (GNOME Keyring, KWallet, KeePassXC…), never in the config file.
-  The folder pane lists each account's folders under its name; a message
-  is sent through the account its From address belongs to.
+  The folder pane lists the shown account's folders, with each other
+  account on one line with its unread count; Tab switches account. A
+  message is sent through the account its From address belongs to.
 - Conversations: replies are grouped across folders, so your own answers
   from Sent appear in the thread.
 - HTML mail converted to text, with numbered links listed under each
@@ -119,6 +120,7 @@ The bottom line of the window always shows the keys for what you're doing.
 | j / k | move |
 | Enter | open the conversation |
 | c or ← | folders |
+| Tab / Shift+Tab | next / previous account |
 | m | new message |
 | r / g / f | reply / reply all / forward |
 | a / s / d | archive / junk / trash |

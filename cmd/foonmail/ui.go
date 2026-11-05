@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	listHints = "j/k move · Enter open · c or ← folders · m new · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
+	listHints = "j/k move · Enter open · c or ← folders · Tab next account · m new · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
 	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
 )
 
@@ -144,6 +144,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "F"},
 			key.Filter{Focus: t, Name: key.NameEscape},
 			key.Filter{Focus: t, Name: "Q"},
+			key.Filter{Focus: t, Name: key.NameTab, Optional: key.ModShift},
 		)
 		if !ok {
 			break
@@ -154,6 +155,12 @@ func (u *ui) updateList(gtx layout.Context) {
 		}
 		page := max(1, u.viewH/u.rowH-1)
 		switch ke.Name {
+		case key.NameTab:
+			if ke.Modifiers.Contain(key.ModShift) {
+				u.switchAccount(-1)
+			} else {
+				u.switchAccount(1)
+			}
 		case "J", key.NameDownArrow:
 			u.moveTo(u.sel + 1)
 		case "K", key.NameUpArrow:
@@ -305,9 +312,51 @@ func (u *ui) header(gtx layout.Context) layout.Dimensions {
 		parts = append(parts, "offline")
 	}
 	return layout.Inset{Top: 10, Bottom: 10, Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		l := material.Label(u.th, 16, strings.Join(parts, " · "))
-		l.Font.Weight = font.Bold
-		return l.Layout(gtx)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, 16, strings.Join(parts, " · "))
+				l.Font.Weight = font.Bold
+				return l.Layout(gtx)
+			}),
+			layout.Rigid(u.accountLine),
+		)
+	})
+}
+
+// accountLine lists the accounts with their unread inbox mail, the shown
+// one first in bold, when there is more than one.
+func (u *ui) accountLine(gtx layout.Context) layout.Dimensions {
+	if len(u.accounts) < 2 {
+		return layout.Dimensions{}
+	}
+	var items []layout.FlexChild
+	label := func(s string, c color.NRGBA, bold bool) {
+		items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Label(u.th, u.th.TextSize*0.85, s)
+			l.Color, l.MaxLines = c, 1
+			if bold {
+				l.Font.Weight = font.Bold
+			}
+			return l.Layout(gtx)
+		}))
+	}
+	for i, a := range u.accounts {
+		if i > 0 {
+			label("  ·  ", u.muted, false)
+		}
+		current := a.id == u.accountID
+		c := u.muted
+		if current {
+			c = u.th.Fg
+		}
+		label(a.cfg.Name, c, current)
+		if n := u.inboxUnread[a.id]; n > 0 {
+			label(" "+fmt.Sprint(n), u.accent, current)
+		}
+	}
+	label("    Tab switches", u.muted, false)
+	return layout.Inset{Top: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Baseline}.Layout(gtx, items...)
 	})
 }
 

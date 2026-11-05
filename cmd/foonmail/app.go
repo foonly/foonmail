@@ -128,6 +128,7 @@ type ui struct {
 	contacts      []contact          // ranked correspondents, for address suggestions
 	accounts      []*account         // every account the window can show; the shown one's fields are below
 	missing       []*config.Account  // configured accounts not in the cache yet
+	inboxUnread   map[int64]int      // unread mail in each account's INBOX, by account id
 	dataDir       string
 	autosavePath  string // where the message being written is kept; "" for none
 	focusWindow   func() // brings the window forward; hyprctl on Hyprland
@@ -163,6 +164,7 @@ func (u *ui) drain() {
 // reload rereads the folder (and Sent, for replies) from the cache and
 // regroups it, keeping the selected conversation.
 func (u *ui) reload() {
+	u.refreshInboxUnread()
 	keep := ""
 	if c := u.current(); c != nil {
 		keep = c.key

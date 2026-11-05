@@ -105,3 +105,46 @@ func (u *ui) loadMissing() {
 	}
 	u.missing = still
 }
+
+// switchAccount shows the next (delta 1) or previous (-1) account's INBOX.
+func (u *ui) switchAccount(delta int) {
+	n := len(u.accounts)
+	if n < 2 {
+		u.notice = "There is only one account"
+		return
+	}
+	i := 0
+	for j, a := range u.accounts {
+		if a.id == u.accountID {
+			i = j
+		}
+	}
+	u.showFolder(u.accounts[(i+delta+n)%n].inbox)
+}
+
+// isInbox reports whether a folder is one of the accounts' INBOX.
+func (u *ui) isInbox(folderID int64) bool {
+	for _, a := range u.accounts {
+		if a.inbox.ID == folderID {
+			return true
+		}
+	}
+	return false
+}
+
+// refreshInboxUnread counts each account's unread INBOX mail, for the
+// account line and the folder pane.
+func (u *ui) refreshInboxUnread() {
+	if len(u.accounts) < 2 {
+		return
+	}
+	counts := map[int64]int{}
+	for _, a := range u.accounts {
+		c, err := u.db.FolderCounts(context.Background(), a.id)
+		if err != nil {
+			continue
+		}
+		counts[a.id] = c[a.inbox.ID].Unread
+	}
+	u.inboxUnread = counts
+}

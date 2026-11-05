@@ -50,7 +50,8 @@ type folderRow struct {
 	label  string // the last part of the name
 	depth  int    // nesting level, for indentation
 	counts cache.Counts
-	header bool // an account's name, not a folder; it can't be selected
+	header bool // the shown account's name above its folders; it can't be selected
+	other  bool // another account, folded to one line; folder is its INBOX
 }
 
 var specialLabels = map[string]string{
@@ -148,29 +149,38 @@ func folderRows(folders []cache.Folder, counts map[int64]cache.Counts, year int)
 }
 
 // refreshPaneRows rereads the folder list and counts, keeping the
-// selection. With several accounts, each account's folders come under its
-// name, in the order of the configuration.
+// selection. With several accounts, the shown one's folders come under its
+// name and each other account is one line with its unread INBOX mail;
+// moving onto that line switches to the account. Accounts keep the order
+// of the configuration.
 func (u *ui) refreshPaneRows() {
 	if len(u.missing) > 0 {
 		u.loadMissing()
 	}
-	ids := []int64{u.accountID}
-	if len(u.accounts) > 1 {
-		ids = ids[:0]
-		for _, a := range u.accounts {
-			ids = append(ids, a.id)
-		}
-	}
 	var rows []folderRow
-	for _, id := range ids {
-		r, err := u.accountRows(id)
+	if len(u.accounts) < 2 {
+		r, err := u.accountRows(u.accountID)
 		if err != nil {
 			u.notice = err.Error()
 			return
 		}
-		if len(ids) > 1 {
-			rows = append(rows, folderRow{label: u.accountByID(id).cfg.Name, header: true, folder: cache.Folder{AccountID: id}})
+		rows = r
+	}
+	for _, a := range u.accounts {
+		if len(u.accounts) < 2 {
+			break
 		}
+		if a.id != u.accountID {
+			counts, _ := u.db.FolderCounts(context.Background(), a.id)
+			rows = append(rows, folderRow{label: a.cfg.Name, other: true, folder: a.inbox, counts: counts[a.inbox.ID]})
+			continue
+		}
+		r, err := u.accountRows(a.id)
+		if err != nil {
+			u.notice = err.Error()
+			return
+		}
+		rows = append(rows, folderRow{label: a.cfg.Name, header: true, folder: cache.Folder{AccountID: a.id}})
 		rows = append(rows, r...)
 	}
 	u.pane.rows = rows
@@ -278,7 +288,26 @@ func (u *ui) movePane(i int) {
 	} else if p.sel >= p.list.Position.First+visible {
 		p.list.Position.First, p.list.Position.Offset = p.sel-visible+1, 0
 	}
+	if p.rows[p.sel].other {
+		// Another account: show it, with its folders unfolded in the pane.
+		u.previewFolder(p.rows[p.sel].folder)
+		u.refreshPaneRows()
+		p.keepVisible(u)
+		return
+	}
 	u.previewFolder(p.rows[p.sel].folder)
+}
+
+// keepVisible scrolls the pane to the selection after its rows changed.
+func (p *folderPane) keepVisible(u *ui) {
+	visible := max(1, u.viewH/max(1, u.rowH))
+	top := p.sel
+	if top > 0 && p.rows[top-1].header {
+		top--
+	}
+	if top < p.list.Position.First || p.sel >= p.list.Position.First+visible {
+		p.list.Position.First, p.list.Position.Offset = max(0, top-1), 0
+	}
 }
 
 func (u *ui) updateFolderPane(gtx layout.Context) {
@@ -402,7 +431,7 @@ func (u *ui) paneRow(gtx layout.Context, i int) layout.Dimensions {
 	r := u.pane.rows[i]
 	size := image.Pt(gtx.Constraints.Max.X, u.rowH)
 	gtx.Constraints = layout.Exact(size)
-	if r.header {
+	if r.header || r.other {
 		return u.accountHeader(gtx, r, i)
 	}
 	if i == u.pane.sel {
@@ -478,18 +507,38 @@ func specialFolders(folders []cache.Folder, year int) (special map[string]cache.
 	return special, yearLabel
 }
 
-// accountHeader is an account's name above its folders, with a line
-// between accounts.
+// accountHeader is an account's name: above the shown account's folders,
+// or for another account, a line of its own with its unread INBOX mail.
+// A line separates accounts.
 func (u *ui) accountHeader(gtx layout.Context, r folderRow, i int) layout.Dimensions {
 	size := gtx.Constraints.Max
-	if i > 0 {
+	if i == u.pane.sel {
+		bg := u.selBgBlurred
+		if gtx.Focused(u.pane.tag) {
+			bg = u.selBg
+		}
+		paint.FillShape(gtx.Ops, bg, clip.Rect{Max: size}.Op())
+	}
+	if i > 0 && (r.header || !u.pane.rows[i-1].other) {
 		paint.FillShape(gtx.Ops, u.line, clip.Rect{Max: image.Pt(size.X, gtx.Dp(1))}.Op())
+	}
+	detail := ""
+	if r.other && r.counts.Unread > 0 {
+		detail = fmt.Sprint(r.counts.Unread)
 	}
 	return layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				l := material.Label(u.th, u.th.TextSize*0.85, strings.ToUpper(r.label))
 				l.Color, l.Font.Weight, l.MaxLines = u.accent, font.Bold, 1
+				if r.other {
+					l.Color = u.muted
+				}
+				return l.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, u.th.TextSize*0.85, detail)
+				l.Color, l.Font.Weight = u.accent, font.Bold
 				return l.Layout(gtx)
 			}),
 		)

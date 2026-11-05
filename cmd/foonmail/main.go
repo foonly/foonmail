@@ -181,6 +181,8 @@ func (u *ui) follow(events <-chan rpc.Event) {
 				}
 				if id == u.folder.ID || (u.sent != nil && id == u.sent.ID) {
 					u.reload()
+				} else if u.isInbox(id) {
+					u.refreshInboxUnread() // another account's new mail
 				}
 			})
 		case rpc.StatusChanged:
