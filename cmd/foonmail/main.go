@@ -139,7 +139,7 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 		now:         time.Now,
 		listTag:     new(int),
 		viewPtr:     new(int),
-		mono:        font.Font{Typeface: "monospace"},
+		mono:        font.Font{Typeface: withEmoji("monospace")},
 		results:     make(chan func(), 256),
 		openURL:     xdgOpen,
 		downloads:   downloadDir,
@@ -150,6 +150,7 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 	u.pane.tag = new(int)
 	u.pane.list.Axis = layout.Vertical
 	u.th.TextSize = 15
+	u.th.Face = withEmoji("sans-serif")
 	u.search.SingleLine, u.search.Submit = true, true
 	u.focusReq = u.listTag
 	if desktop.PrefersDark() {
