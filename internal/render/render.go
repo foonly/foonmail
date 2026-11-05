@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	stdhtml "html"
 	"io"
 	"path/filepath"
 	"regexp"
@@ -156,10 +157,10 @@ func Render(raw []byte, opts Options) (*Message, error) {
 	}
 
 	switch {
-	case m.HasHTML && (opts.PreferHTML || !m.HasPlain || isStub(plain, conv.text)):
+	case m.HasHTML && (opts.PreferHTML || !m.HasPlain || isStub(plain, conv.text) || brokenPlain(plain)):
 		m.Text, m.Source, m.Links = conv.text, SourceHTML, conv.links
 	case m.HasPlain:
-		m.Text, m.Source = tidy(plain), SourcePlain
+		m.Text, m.Source = tidy(cleanEntities(plain)), SourcePlain
 		if opts.LinkPlain {
 			m.Text, m.Links = linkifyPlain(m.Text, newNumberer(opts))
 		}
@@ -186,6 +187,46 @@ func isStub(plain, htmlText string) bool {
 	htmlWords := len(strings.Fields(htmlText))
 	return (words < 40 && stubPhrase.MatchString(p) && htmlWords > words) ||
 		(words < 15 && htmlWords > 4*words)
+}
+
+// htmlEntity matches an HTML character reference: "&#8199;", "&shy;".
+var htmlEntity = regexp.MustCompile(`&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,7});`)
+
+// gluedSentence matches sentences run together where tags were stripped
+// without a space: "application.Check-in".
+var gluedSentence = regexp.MustCompile(`\p{Ll}{2}[.!?:]\p{Lu}\p{Ll}`)
+
+// brokenPlain reports whether a text part was made from HTML so badly the
+// HTML reads better: character references left as they were (preview
+// padding like "&#8199;&#847;" or "&shy;"), or the layout's indentation
+// kept while sentences lost the spaces between them.
+func brokenPlain(plain string) bool {
+	if len(htmlEntity.FindAllStringIndex(plain, 3)) >= 3 {
+		return true
+	}
+	indented := 0
+	for _, l := range strings.Split(plain, "\n") {
+		if len(l)-len(strings.TrimLeft(l, " ")) >= 16 && strings.TrimSpace(l) != "" {
+			indented++
+		}
+	}
+	return indented >= 3 && len(gluedSentence.FindAllStringIndex(plain, 2)) >= 2
+}
+
+// cleanEntities decodes character references left in a text part that has
+// several, and drops the invisible padding they often are, with the
+// spaces it leaves at line ends.
+func cleanEntities(plain string) string {
+	if len(htmlEntity.FindAllStringIndex(plain, 3)) < 3 {
+		return plain
+	}
+	lines := strings.Split(invisible.Replace(stdhtml.UnescapeString(plain)), "\n")
+	for i, l := range lines {
+		if l != "-- " { // the signature separator keeps its space
+			lines[i] = strings.TrimRightFunc(l, unicode.IsSpace)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Message) readHeader(h *mail.Header) {

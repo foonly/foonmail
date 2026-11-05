@@ -149,3 +149,32 @@ func TestTabsExpand(t *testing.T) {
 		t.Errorf("spans %+v", m.LinkSpans)
 	}
 }
+
+func TestBrokenPlainPrefersHTML(t *testing.T) {
+	html := `<p>Hey Kim</p><p>Your trip on the ship is approaching!</p><ul><li>Check-in opens 2 hours before.</li><li>Boarding starts 40 minutes before.</li></ul>`
+	cases := map[string]string{
+		"entities": "Useful information &#8199;&#847; &#8199;&#847; &#8199;&#847;\n&shy; &shy; &shy;\nHey Kim\nYour trip on the ship is approaching!",
+		"glued and indented": "                    Hey KimYour trip on the ship is approaching!\n" +
+			"                    Schedule:Check-in opens 2 hours before.Boarding starts 40 minutes before.\n" +
+			"                    learn more\n                    Tallink app.Download it now.",
+	}
+	for name, plain := range cases {
+		m := mustRender(t, multipartAlt(plain, html), Options{})
+		if m.Source != SourceHTML {
+			t.Errorf("%s: used the %v part:\n%s", name, m.Source, m.Text)
+		}
+	}
+	// Ordinary text with a little indentation or an odd entity stays.
+	ok := "Hi,\n\n    indented code\nSee https://example.org/?a=1&amp;b=2 for more.\nThanks!"
+	if m := mustRender(t, multipartAlt(ok, html), Options{}); m.Source != SourcePlain {
+		t.Errorf("ordinary text part replaced by HTML")
+	}
+}
+
+func TestEntitiesDecodedWithoutHTML(t *testing.T) {
+	m := mustRender(t, raw([]string{"Content-Type: text/plain; charset=utf-8"},
+		"Preview &#8199;&#847; &#8199;&#847; &shy; &shy;\n&#8199;&#847; &#8199;&#847;\n\nVaihda titaaniseen leikkuulautaan j&#228;&#228;!"), Options{})
+	if want := "Preview\n\nVaihda titaaniseen leikkuulautaan jää!"; m.Text != want {
+		t.Errorf("got %q\nwant %q", m.Text, want)
+	}
+}
