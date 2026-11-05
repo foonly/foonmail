@@ -723,3 +723,64 @@ func TestNextReachesShortLastMessage(t *testing.T) {
 		t.Errorf("replied to %q, want the current message b@test", got)
 	}
 }
+
+// With several messages, ↓ and ↑ scroll through a message taller than the
+// view, stop at its end, and only then move to the next or previous one.
+func TestArrowsScrollThenMove(t *testing.T) {
+	h := newHarness(t)
+	h.height = 300
+	id := h.ids["b"]
+	h.daemon.raw[id] = rawMsg("Me <me@example.org>", "Re: Kahvi?", "b", "a", strings.Repeat("A long line of text.\n", 60))
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	o := h.u.conv
+	o.cur, o.list.Position = 0, layout.Position{}
+	h.frame()
+
+	down := func() { h.press(key.NameDownArrow) }
+	up := func() { h.press(key.NameUpArrow) }
+	for range 20 {
+		if o.cur == 1 {
+			break
+		}
+		down()
+	}
+	if o.cur != 1 {
+		t.Fatalf("↓ never reached the long message; current %d", o.cur)
+	}
+	if top, _, _ := o.curBounds(); top != 0 {
+		t.Errorf("the long message starts at %d, not the top", top)
+	}
+
+	// Scroll through it: the current message stays until its end shows.
+	presses := 0
+	for o.cur == 1 && presses < 100 {
+		_, bottom, _ := o.curBounds()
+		down()
+		presses++
+		if o.cur == 2 && bottom != h.u.viewH {
+			t.Errorf("moved on with the message's end at %d, view %d", bottom, h.u.viewH)
+		}
+	}
+	if o.cur != 2 || presses < 5 {
+		t.Fatalf("after %d presses current %d", presses, o.cur)
+	}
+
+	// ↑ goes back to the long message's end, then scrolls up through it.
+	up()
+	if _, bottom, _ := o.curBounds(); o.cur != 1 || bottom != h.u.viewH {
+		t.Fatalf("↑: current %d, its end at %d (view %d)", o.cur, bottom, h.u.viewH)
+	}
+	presses = 0
+	for o.cur == 1 && presses < 100 {
+		top, _, _ := o.curBounds()
+		up()
+		presses++
+		if o.cur == 0 && top != 0 {
+			t.Errorf("moved back with the message's top at %d", top)
+		}
+	}
+	if o.cur != 0 || presses < 5 {
+		t.Errorf("after %d presses up, current %d", presses, o.cur)
+	}
+}

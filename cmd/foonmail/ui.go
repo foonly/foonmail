@@ -25,7 +25,7 @@ import (
 
 const (
 	listHints = "j/k move · Enter open · c or ← folders · m new · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
-	viewHints = "Esc back · j/k or →/← conversations · n/p messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -507,11 +507,67 @@ func (u *ui) updateView(gtx layout.Context) {
 		case name == "-" || name == key.NamePageUp:
 			u.scrollBody(-page)
 		case name == key.NameDownArrow:
-			u.scrollBody(3 * u.rowH)
+			u.arrowDown(o)
 		case name == key.NameUpArrow:
-			u.scrollBody(-3 * u.rowH)
+			u.arrowUp(o)
 		}
 	}
+}
+
+// arrowDown scrolls the current message while more of it is below the
+// view, stopping where it ends; from there it moves to the next message.
+// A conversation of one message just scrolls.
+func (u *ui) arrowDown(o *openConv) {
+	step := 3 * u.rowH
+	_, bottom, ok := o.curBounds()
+	switch {
+	case len(o.parts) < 2 || !ok:
+		u.scrollBody(step)
+	case bottom > u.viewH:
+		u.scrollBody(min(step, bottom-u.viewH))
+	case o.cur < len(o.parts)-1:
+		o.cur++
+		o.list.Position = layout.Position{First: o.cur}
+	}
+}
+
+// arrowUp scrolls back to the top of the current message, then moves to
+// the previous one, showing its end if it doesn't fit in the view.
+func (u *ui) arrowUp(o *openConv) {
+	step := 3 * u.rowH
+	top, _, ok := o.curBounds()
+	switch {
+	case len(o.parts) < 2 || !ok:
+		u.scrollBody(-step)
+	case top < 0:
+		u.scrollBody(max(-step, top))
+	case o.cur > 0:
+		o.cur--
+		pos := layout.Position{First: o.cur}
+		if h, known := o.heights[o.cur]; known && h > u.viewH {
+			pos.Offset = h - u.viewH
+		}
+		o.list.Position = pos
+	}
+}
+
+// curBounds is where the current message's top and bottom are in the
+// view, from the heights drawn last frame.
+func (o *openConv) curBounds() (top, bottom int, ok bool) {
+	pos := o.list.Position
+	if o.cur < pos.First {
+		return 0, 0, false
+	}
+	top = -pos.Offset
+	for i := pos.First; i < o.cur; i++ {
+		h, known := o.heights[i]
+		if !known {
+			return 0, 0, false
+		}
+		top += h
+	}
+	h, known := o.heights[o.cur]
+	return top, top + h, known
 }
 
 func (u *ui) scrollBody(px int) {
@@ -578,12 +634,15 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 	dims := material.List(u.th, &o.list).Layout(gtx, len(o.parts), func(gtx layout.Context, i int) layout.Dimensions {
 		inset := layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}
 		if i != o.cur || len(o.parts) < 2 {
-			return inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+			d := inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+			o.heights[i] = d.Size.Y
+			return d
 		}
 		// The current message gets a bar down its left side.
 		m := op.Record(gtx.Ops)
 		d := inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
 		call := m.Stop()
+		o.heights[i] = d.Size.Y
 		top := gtx.Dp(inset.Top)
 		if i > 0 {
 			top += gtx.Dp(1) // below the divider

@@ -63,6 +63,7 @@ type openConv struct {
 	parts      []*part
 	showQuotes bool
 	cur        int    // the message n and p move between, and replies answer
+	heights    map[int]int // each message's height in px when last drawn
 	linkInput  string // digits typed to open a link
 	list       widget.List
 }
@@ -262,7 +263,7 @@ func (u *ui) open() {
 	if c == nil {
 		return
 	}
-	o := &openConv{conv: *c}
+	o := &openConv{conv: *c, heights: map[int]int{}}
 	o.list.Axis = layout.Vertical
 	target := -1
 	for i, m := range c.members {
