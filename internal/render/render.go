@@ -77,6 +77,9 @@ type Attachment struct {
 type Message struct {
 	Subject      string
 	From, To, Cc []Address
+	ReplyTo      []Address
+	MessageID    string   // without <>
+	References   []string // without <>, oldest first
 	Date         time.Time
 
 	Text   string // what to show; lines starting with ">" are quoted
@@ -174,6 +177,9 @@ func (m *Message) readHeader(h *mail.Header) {
 	m.From = addresses(h, "From")
 	m.To = addresses(h, "To")
 	m.Cc = addresses(h, "Cc")
+	m.ReplyTo = addresses(h, "Reply-To")
+	m.MessageID, _ = h.MessageID()
+	m.References, _ = h.MsgIDList("References")
 }
 
 func addresses(h *mail.Header, key string) []Address {

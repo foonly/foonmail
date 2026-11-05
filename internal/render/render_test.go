@@ -319,3 +319,16 @@ func TestLinkOffset(t *testing.T) {
 		t.Errorf("text %q, links %+v", m.Text, m.Links)
 	}
 }
+
+func TestReplyHeaders(t *testing.T) {
+	m := mustRender(t, raw([]string{
+		"From: Bob <bob@example.com>",
+		"Reply-To: list@example.com",
+		"Message-ID: <c@x>",
+		"References: <a@x>\r\n <b@x>",
+		"Content-Type: text/plain",
+	}, "Hi"), Options{})
+	if m.MessageID != "c@x" || len(m.References) != 2 || m.References[1] != "b@x" || m.ReplyTo[0].Addr != "list@example.com" {
+		t.Errorf("MessageID %q, References %v, ReplyTo %v", m.MessageID, m.References, m.ReplyTo)
+	}
+}
