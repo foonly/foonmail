@@ -100,23 +100,23 @@ SMTP uses the IMAP host and username unless you set them. The example file
 lists every setting. Unknown settings are reported as errors, so typos don't
 go unnoticed.
 
-Store each server's password in the keyring:
+Then store the passwords in the keyring:
 
 ```sh
-secret-tool store --label='foonmail: you on mail.example.com' \
-    service foonmail/mail.example.com username you
+foonmailctl passwords
 ```
+
+It lists the passwords your accounts need and which the keyring has, asks
+for the missing ones, and logs in to each server before storing what you
+typed, so a typo is caught at once. `-check` also logs in with the stored
+passwords, and `-change ACCOUNT` replaces one. (Passwords are stored under
+service `foonmail/HOST` and your login, should you want `secret-tool`.)
 
 ### Gmail
 
 Gmail works with an app password: turn on 2-Step Verification, create one
-at <https://myaccount.google.com/apppasswords>, and store it for the IMAP
-server (SMTP uses the same entry):
-
-```sh
-secret-tool store --label='foonmail: you@gmail.com on imap.gmail.com' \
-    service foonmail/imap.gmail.com username you@gmail.com
-```
+at <https://myaccount.google.com/apppasswords>, and give it to
+`foonmailctl passwords`. It is asked for once: SMTP uses the IMAP entry.
 
 `config.example.toml` has the account settings. foonmail doesn't copy sent
 mail to Sent Mail, since Gmail does that itself, and archiving (a) moves
@@ -169,6 +169,7 @@ foonmailctl status               # accounts: online, unread, new
 foonmailctl send home message.eml
 foonmailctl outbox               # what is waiting, sending or sent
 foonmailctl undo ID
+foonmailctl passwords            # store missing passwords in the keyring
 ```
 
 The daemon logs to the journal: `journalctl --user -u foonmaild -f`.

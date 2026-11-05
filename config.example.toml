@@ -1,9 +1,12 @@
 # foonmail configuration.
 # Copy to ~/.config/foonmail/config.toml (or set FOONMAIL_CONFIG).
 #
-# Passwords are not stored here. Put each one in the Secret Service keyring:
+# Passwords are not stored here but in the Secret Service keyring. Once the
+# accounts are set up, run
 #
-#   secret-tool store --label='foonmail: LOGIN on HOST' service foonmail/HOST username LOGIN
+#   foonmailctl passwords
+#
+# to type the missing ones; each is checked by logging in before it is stored.
 #
 # Unknown settings are reported as errors, so typos don't go unnoticed.
 
@@ -53,8 +56,8 @@ username = "you"
 # poll_interval = "5m"
 
 # A Gmail account. Gmail needs an app password (with 2-Step Verification
-# on: myaccount.google.com/apppasswords), stored once for imap.gmail.com;
-# SMTP uses the same entry. Sent mail isn't copied to Sent Mail (Gmail
+# on: myaccount.google.com/apppasswords); foonmailctl passwords asks for it
+# once, as SMTP uses the IMAP entry. Sent mail isn't copied to Sent Mail (Gmail
 # does that itself), and archiving moves mail to All Mail.
 #
 # [[account]]

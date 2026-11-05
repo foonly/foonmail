@@ -5,6 +5,7 @@
 //	foonmailctl outbox                    list unfinished and recent messages
 //	foonmailctl undo ID                   take a message back during the undo window
 //	foonmailctl resolve ID resend|sent    settle an uncertain or failed message
+//	foonmailctl passwords                 check the keyring and store missing passwords
 package main
 
 import (
@@ -27,6 +28,7 @@ const usage = `usage:
   foonmailctl outbox
   foonmailctl undo ID
   foonmailctl resolve ID resend|sent
+  foonmailctl passwords [-check] [-change ACCOUNT] [-no-verify]
 `
 
 func main() {
@@ -40,6 +42,9 @@ func run(args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+	if args[0] == "passwords" {
+		return runPasswords(args[1:]) // needs the keyring, not the daemon
 	}
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {

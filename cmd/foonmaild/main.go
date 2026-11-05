@@ -19,13 +19,13 @@ import (
 	"syscall"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/zalando/go-keyring"
 
 	"foonmail/internal/cache"
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
 	"foonmail/internal/outbox"
 	"foonmail/internal/rpc"
+	"foonmail/internal/secrets"
 	"foonmail/internal/tray"
 )
 
@@ -189,32 +189,7 @@ func connectDesktop(h *hub, conn *dbus.Conn, log *slog.Logger) (closeDesktop fun
 	}
 }
 
-// passwords reads servers' passwords from the Secret Service keyring. An
-// SMTP server on another host than its account's IMAP server (Gmail's
-// smtp.gmail.com and imap.gmail.com) uses the IMAP password when it has
-// none of its own and the same username, so one entry does for both.
+// passwords reads servers' passwords from the keyring.
 func passwords(cfg *config.Config) func(config.Server) (string, error) {
-	return func(s config.Server) (string, error) {
-		p, err := password(s)
-		if !errors.Is(err, keyring.ErrNotFound) {
-			return p, err
-		}
-		for _, a := range cfg.Accounts {
-			if a.SMTP == s && a.IMAP.Host != s.Host && a.IMAP.Username == s.Username {
-				if p, ierr := password(a.IMAP); ierr == nil {
-					return p, nil
-				}
-			}
-		}
-		service, user := s.SecretService()
-		return "", fmt.Errorf("no password in the keyring for %s on %s; store it with: "+
-			"secret-tool store --label='foonmail: %s on %s' service %s username %s",
-			user, s.Host, user, s.Host, service, user)
-	}
-}
-
-// password reads a server's password from the Secret Service keyring.
-func password(s config.Server) (string, error) {
-	service, user := s.SecretService()
-	return keyring.Get(service, user)
+	return func(s config.Server) (string, error) { return secrets.Lookup(cfg, s) }
 }
