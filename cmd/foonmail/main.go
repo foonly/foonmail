@@ -66,44 +66,38 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 	if err != nil {
 		return nil, nil, err
 	}
-	acct := &cfg.Accounts[0]
-	if accountName != "" {
-		if acct, err = cfg.Account(accountName); err != nil {
-			return nil, nil, err
-		}
-	}
 	db, err := cache.OpenReadOnly(filepath.Join(cfg.CacheDir, "mail.db"))
 	if err != nil {
 		return nil, nil, err
 	}
+	// Every account the daemon has cached; one that isn't there yet (just
+	// added, or never connected) is left out with a warning.
 	ctx := context.Background()
-	accountID, err := db.AccountID(ctx, acct.Name)
-	if err != nil {
-		db.Close()
-		return nil, nil, fmt.Errorf("account %s isn't in the cache yet; is foonmaild running? (%v)", acct.Name, err)
-	}
-	folders, err := db.Folders(ctx, accountID)
-	if err != nil {
-		db.Close()
-		return nil, nil, err
-	}
 	u := newUI(db, log)
-	u.account, u.accountID, u.own = acct, accountID, acct.Addresses()
-	u.autosavePath = filepath.Join(cfg.DataDir, "unsent-"+acct.Name+".json")
-	found := false
-	for _, f := range folders {
-		if f.Name == "INBOX" {
-			u.folder, found = f, true
+	u.dataDir = cfg.DataDir
+	var first *account
+	for i := range cfg.Accounts {
+		a, err := loadAccount(ctx, db, &cfg.Accounts[i], cfg.DataDir)
+		if err != nil {
+			log.Warn("account not shown yet", "account", cfg.Accounts[i].Name, "err", err)
+			u.missing = append(u.missing, &cfg.Accounts[i])
+			continue
 		}
-		if f.SpecialUse == `\Sent` {
-			sent := f
-			u.sent = &sent
+		u.accounts = append(u.accounts, a)
+		if first == nil || a.cfg.Name == accountName {
+			first = a
 		}
 	}
-	if !found {
+	switch {
+	case first == nil:
 		db.Close()
-		return nil, nil, errors.New("INBOX isn't in the cache yet; is foonmaild running?")
+		return nil, nil, errors.New("no account is in the cache yet; is foonmaild running?")
+	case accountName != "" && first.cfg.Name != accountName:
+		db.Close()
+		return nil, nil, fmt.Errorf("account %s isn't in the cache yet; is foonmaild running?", accountName)
 	}
+	u.useAccount(first)
+	u.folder = first.inbox
 
 	cleanup := func() { db.Close() }
 	if conn, err := dbus.ConnectSessionBus(); err != nil {

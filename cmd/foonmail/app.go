@@ -126,8 +126,11 @@ type ui struct {
 	openURL       func(string) error // opens a link or a file; xdg-open
 	downloads     func() string      // where w saves attachments
 	contacts      []contact          // ranked correspondents, for address suggestions
-	autosavePath  string             // where the message being written is kept; "" for none
-	focusWindow   func()             // brings the window forward; hyprctl on Hyprland
+	accounts      []*account         // every account the window can show; the shown one's fields are below
+	missing       []*config.Account  // configured accounts not in the cache yet
+	dataDir       string
+	autosavePath  string // where the message being written is kept; "" for none
+	focusWindow   func() // brings the window forward; hyprctl on Hyprland
 	focusReq      event.Tag
 
 	results chan func()
@@ -405,6 +408,11 @@ func (u *ui) switchFolder(f cache.Folder) {
 
 // showFolder shows a folder's cached contents.
 func (u *ui) showFolder(f cache.Folder) {
+	if f.AccountID != u.accountID {
+		if a := u.accountByID(f.AccountID); a != nil {
+			u.useAccount(a)
+		}
+	}
 	u.folder = f
 	u.search.SetText("")
 	u.searching = false

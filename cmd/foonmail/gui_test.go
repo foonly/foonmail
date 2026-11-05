@@ -40,6 +40,7 @@ type fakeDaemon struct {
 	flagged  []string
 	synced   []int64
 	sent     [][]byte
+	sentVia  []string // the account of each sent message
 	drafts   [][]byte
 	deleted  []string
 	moved    []string
@@ -89,6 +90,7 @@ func (d *fakeDaemon) Send(_ context.Context, account string, raw []byte) (int64,
 		return 0, d.err
 	}
 	d.sent = append(d.sent, raw)
+	d.sentVia = append(d.sentVia, account)
 	return int64(len(d.sent)), nil
 }
 

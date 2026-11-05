@@ -20,6 +20,8 @@ There is also **foonmailctl**, a command-line tool for the daemon.
 
 - Several IMAP/SMTP accounts, with passwords kept in the Secret Service
   keyring (GNOME Keyring, KWallet, KeePassXC…), never in the config file.
+  The folder pane lists each account's folders under its name; a message
+  is sent through the account its From address belongs to.
 - Conversations: replies are grouped across folders, so your own answers
   from Sent appear in the thread.
 - HTML mail converted to text, with numbered links listed under each

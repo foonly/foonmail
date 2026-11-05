@@ -19,6 +19,7 @@ import (
 
 	"foonmail/internal/cache"
 	"foonmail/internal/compose"
+	"foonmail/internal/config"
 	"foonmail/internal/render"
 	"foonmail/internal/rpc"
 )
@@ -38,8 +39,10 @@ type composer struct {
 	answering   *cache.Entry // the message replied to, to mark it \Answered
 	draftOf     *cache.Entry // the stored draft being continued, deleted once sent
 	returnTo    mode
-	busy        bool // sending, picking files or in the external editor
-	discarding  bool // Esc was pressed once with something written
+	account     *config.Account // the account it was started from
+	autosave    string          // where it is kept while being written; "" for nowhere
+	busy        bool            // sending, picking files or in the external editor
+	discarding  bool            // Esc was pressed once with something written
 
 	// Address suggestions for the entry being typed in suggField.
 	sugg      []contact
@@ -82,7 +85,7 @@ func (c *composer) changed() bool {
 
 // startCompose opens the compose view on a draft.
 func (u *ui) startCompose(d *compose.Draft, answering *cache.Entry) {
-	c := &composer{base: d, initial: *d, answering: answering, returnTo: u.mode}
+	c := &composer{base: d, initial: *d, answering: answering, returnTo: u.mode, account: u.account, autosave: u.autosavePath}
 	for _, e := range []*widget.Editor{&c.from, &c.to, &c.cc, &c.bcc, &c.subject} {
 		e.SingleLine = true
 	}
@@ -188,7 +191,7 @@ func (u *ui) leaveCompose() {
 	u.comp = nil
 	// Sent, saved to Drafts or discarded: the copy kept in case of a crash
 	// has done its job.
-	u.removeAutosave()
+	u.removeAutosave(c)
 	u.mode = c.returnTo
 	switch u.mode {
 	case modeList:
@@ -211,7 +214,7 @@ func (u *ui) sendComposed() {
 	}
 	c.busy = true
 	u.notice = "Sending…"
-	account, to := u.account.Name, d.To
+	account, to := u.accountFor(d.From, c.account).Name, d.To
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -434,7 +437,7 @@ func (u *ui) layoutCompose(gtx layout.Context) layout.Dimensions {
 	}
 	header := func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: 10, Bottom: 6, Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			l := material.Label(u.th, 16, title+" · "+u.account.Name)
+			l := material.Label(u.th, 16, title+" · "+u.accountFor(c.from.Text(), c.account).Name)
 			l.Font.Weight = font.Bold
 			return l.Layout(gtx)
 		})
@@ -523,7 +526,7 @@ func (u *ui) saveDraft() {
 	}
 	c.busy = true
 	u.notice = "Saving to Drafts…"
-	account, old := u.account.Name, c.draftOf
+	account, old := u.accountFor(c.from.Text(), c.account).Name, c.draftOf
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

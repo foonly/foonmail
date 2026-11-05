@@ -43,12 +43,14 @@ type folderPane struct {
 	click   gesture.Click
 }
 
-// folderRow is one line of the folder pane.
+// folderRow is one line of the folder pane: a folder, or with several
+// accounts, an account's name above its folders.
 type folderRow struct {
 	folder cache.Folder
 	label  string // the last part of the name
 	depth  int    // nesting level, for indentation
 	counts cache.Counts
+	header bool // an account's name, not a folder; it can't be selected
 }
 
 var specialLabels = map[string]string{
@@ -145,25 +147,69 @@ func folderRows(folders []cache.Folder, counts map[int64]cache.Counts, year int)
 	return rows
 }
 
-// refreshPaneRows rereads the folder list and counts, keeping the selection.
+// refreshPaneRows rereads the folder list and counts, keeping the
+// selection. With several accounts, each account's folders come under its
+// name, in the order of the configuration.
 func (u *ui) refreshPaneRows() {
-	ctx := context.Background()
-	folders, err := u.db.Folders(ctx, u.accountID)
-	if err != nil {
-		u.notice = "Reading folders failed: " + err.Error()
-		return
+	if len(u.missing) > 0 {
+		u.loadMissing()
 	}
-	counts, err := u.db.FolderCounts(ctx, u.accountID)
-	if err != nil {
-		u.notice = "Reading folder counts failed: " + err.Error()
+	ids := []int64{u.accountID}
+	if len(u.accounts) > 1 {
+		ids = ids[:0]
+		for _, a := range u.accounts {
+			ids = append(ids, a.id)
+		}
 	}
-	u.pane.rows = folderRows(folders, counts, u.now().Year())
-	u.pane.sel = 0
+	var rows []folderRow
+	for _, id := range ids {
+		r, err := u.accountRows(id)
+		if err != nil {
+			u.notice = err.Error()
+			return
+		}
+		if len(ids) > 1 {
+			rows = append(rows, folderRow{label: u.accountByID(id).cfg.Name, header: true, folder: cache.Folder{AccountID: id}})
+		}
+		rows = append(rows, r...)
+	}
+	u.pane.rows = rows
+	u.pane.sel = u.pane.selectable(0, 1)
 	for i, r := range u.pane.rows {
-		if r.folder.ID == u.folder.ID {
+		if !r.header && r.folder.ID == u.folder.ID {
 			u.pane.sel = i
 		}
 	}
+}
+
+// accountRows are one account's folders in pane order.
+func (u *ui) accountRows(accountID int64) ([]folderRow, error) {
+	ctx := context.Background()
+	folders, err := u.db.Folders(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("Reading folders failed: %w", err)
+	}
+	counts, err := u.db.FolderCounts(ctx, accountID)
+	if err != nil {
+		u.notice = "Reading folder counts failed: " + err.Error()
+	}
+	return folderRows(folders, counts, u.now().Year()), nil
+}
+
+// selectable is the first folder row from i on in direction dir (+1 or
+// -1), or the other way if there is none; account names are skipped.
+func (p *folderPane) selectable(i, dir int) int {
+	if dir == 0 {
+		dir = 1
+	}
+	for _, d := range []int{dir, -dir} {
+		for j := min(max(i, 0), len(p.rows)-1); j >= 0 && j < len(p.rows); j += d {
+			if !p.rows[j].header {
+				return j
+			}
+		}
+	}
+	return 0
 }
 
 func (u *ui) openPane() {
@@ -216,11 +262,19 @@ func (u *ui) movePane(i int) {
 	if len(p.rows) == 0 {
 		return
 	}
-	p.sel = min(max(i, 0), len(p.rows)-1)
-	// Keep the selection on screen.
+	dir := 1
+	if i < p.sel {
+		dir = -1
+	}
+	p.sel = p.selectable(i, dir)
+	// Keep the selection on screen, with an account's name above it.
 	visible := max(1, u.viewH/max(1, u.rowH))
-	if p.sel < p.list.Position.First {
-		p.list.Position.First, p.list.Position.Offset = p.sel, 0
+	top := p.sel
+	if top > 0 && p.rows[top-1].header {
+		top--
+	}
+	if top < p.list.Position.First {
+		p.list.Position.First, p.list.Position.Offset = top, 0
 	} else if p.sel >= p.list.Position.First+visible {
 		p.list.Position.First, p.list.Position.Offset = p.sel-visible+1, 0
 	}
@@ -281,7 +335,7 @@ func (u *ui) updateFolderPane(gtx layout.Context) {
 			break
 		}
 		i := p.list.Position.First + (ev.Position.Y+p.list.Position.Offset)/max(1, u.rowH)
-		if i < 0 || i >= len(p.rows) {
+		if i < 0 || i >= len(p.rows) || p.rows[i].header {
 			continue
 		}
 		switch {
@@ -348,6 +402,9 @@ func (u *ui) paneRow(gtx layout.Context, i int) layout.Dimensions {
 	r := u.pane.rows[i]
 	size := image.Pt(gtx.Constraints.Max.X, u.rowH)
 	gtx.Constraints = layout.Exact(size)
+	if r.header {
+		return u.accountHeader(gtx, r, i)
+	}
 	if i == u.pane.sel {
 		bg := u.selBgBlurred
 		if gtx.Focused(u.pane.tag) {
@@ -419,4 +476,22 @@ func specialFolders(folders []cache.Folder, year int) (special map[string]cache.
 		}
 	}
 	return special, yearLabel
+}
+
+// accountHeader is an account's name above its folders, with a line
+// between accounts.
+func (u *ui) accountHeader(gtx layout.Context, r folderRow, i int) layout.Dimensions {
+	size := gtx.Constraints.Max
+	if i > 0 {
+		paint.FillShape(gtx.Ops, u.line, clip.Rect{Max: image.Pt(size.X, gtx.Dp(1))}.Op())
+	}
+	return layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, u.th.TextSize*0.85, strings.ToUpper(r.label))
+				l.Color, l.Font.Weight, l.MaxLines = u.accent, font.Bold, 1
+				return l.Layout(gtx)
+			}),
+		)
+	})
 }

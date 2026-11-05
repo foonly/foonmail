@@ -32,7 +32,7 @@ type unsent struct {
 // for a frame when it will have.
 func (u *ui) autosaveDue(gtx layout.Context) {
 	c := u.comp
-	if c == nil || !c.dirty || u.autosavePath == "" {
+	if c == nil || !c.dirty || c.autosave == "" {
 		return
 	}
 	due := c.editedAt.Add(autosaveDelay)
@@ -47,13 +47,13 @@ func (u *ui) autosaveDue(gtx layout.Context) {
 // changed since the last time.
 func (u *ui) autosave() {
 	c := u.comp
-	if c == nil || !c.dirty || u.autosavePath == "" {
+	if c == nil || !c.dirty || c.autosave == "" {
 		return
 	}
 	c.dirty = false
 	data, err := json.Marshal(unsent{Draft: *c.draft(), Answering: c.answering, DraftOf: c.draftOf, Saved: u.now()})
 	if err == nil {
-		err = writeAtomic(u.autosavePath, data)
+		err = writeAtomic(c.autosave, data)
 	}
 	if err != nil {
 		u.log.Warn("keeping a copy of the message being written", "err", err)
@@ -63,41 +63,52 @@ func (u *ui) autosave() {
 
 // removeAutosave deletes the autosave file once its message has been
 // sent, saved to Drafts or discarded.
-func (u *ui) removeAutosave() {
-	if u.autosavePath == "" {
+func (u *ui) removeAutosave(c *composer) {
+	if c.autosave == "" {
 		return
 	}
-	if err := os.Remove(u.autosavePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(c.autosave); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		u.log.Warn("removing the autosaved message", "err", err)
 	}
 }
 
 // restoreUnsent opens the message that was being written when foonmail
-// last closed, if there is one.
+// last closed, if there is one, in the account it was written from.
 func (u *ui) restoreUnsent() {
-	if u.autosavePath == "" {
-		return
+	candidates := u.accounts
+	if len(candidates) == 0 { // only the account set up directly, as in tests
+		candidates = []*account{{cfg: u.account, id: u.accountID, own: u.own, sent: u.sent, inbox: u.folder, autosavePath: u.autosavePath}}
 	}
-	data, err := os.ReadFile(u.autosavePath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return
+	for _, a := range candidates {
+		if a.autosavePath == "" {
+			continue
+		}
+		data, err := os.ReadFile(a.autosavePath)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		var s unsent
+		if err == nil {
+			err = json.Unmarshal(data, &s)
+		}
+		if err != nil {
+			u.log.Warn("reading the autosaved message", "path", a.autosavePath, "err", err)
+			u.notice = "Couldn't restore the message you were writing: see " + a.autosavePath
+			continue
+		}
+		if a.id != u.accountID {
+			u.useAccount(a)
+			u.showFolder(a.inbox)
+		}
+		u.startCompose(&s.Draft, s.Answering)
+		c := u.comp
+		c.draftOf = s.DraftOf
+		// Nothing of it is saved anywhere else, so Esc asks before throwing it away.
+		c.initial = compose.Draft{}
+		c.returnTo = modeList
+		u.notice = "Restored the message you were writing (from " + s.Saved.Local().Format("Mon 15:04") + ")"
+		return // one at a time; another comes back next start
 	}
-	var s unsent
-	if err == nil {
-		err = json.Unmarshal(data, &s)
-	}
-	if err != nil {
-		u.log.Warn("reading the autosaved message", "path", u.autosavePath, "err", err)
-		u.notice = "Couldn't restore the message you were writing: see " + u.autosavePath
-		return
-	}
-	u.startCompose(&s.Draft, s.Answering)
-	c := u.comp
-	c.draftOf = s.DraftOf
-	// Nothing of it is saved anywhere else, so Esc asks before throwing it away.
-	c.initial = compose.Draft{}
-	c.returnTo = modeList
-	u.notice = "Restored the message you were writing (from " + s.Saved.Local().Format("Mon 15:04") + ")"
 }
 
 // writeAtomic replaces path with data, so a crash mid-write leaves the
