@@ -38,6 +38,9 @@ type Account struct {
 	Email       string   `toml:"email"`
 	DisplayName string   `toml:"display_name"`
 	Aliases     []string `toml:"aliases"`
+	// Signature is added under a "-- " line to new messages, replies and
+	// forwards, above any quoted text. Default: none.
+	Signature string `toml:"signature"`
 
 	// AppendSent copies sent mail to the Sent folder. Gmail does this
 	// itself, so it must be false there. Default: true.

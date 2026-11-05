@@ -19,6 +19,12 @@ email = "you@example.com"            # primary address
 display_name = "Your Name"
 aliases = ["postmaster@example.com"] # other addresses that are you
 
+# Added under a "-- " line to new messages, replies and forwards.
+# signature = """
+# Your Name
+# example.com
+# """
+
 # Copy sent mail to the Sent folder. Set to false for Gmail, which does it itself.
 # append_sent = true
 

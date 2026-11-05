@@ -16,9 +16,32 @@ var b64 = base64.StdEncoding
 
 func base64Len(n int) int { return b64.EncodedLen(n) }
 
-// New starts an empty message from an account.
+// New starts an empty message from an account, with its signature.
 func New(acct *config.Account) *Draft {
-	return &Draft{From: identity(acct, "")}
+	d := &Draft{From: identity(acct, "")}
+	if s := signature(acct); s != "" {
+		d.Body = "\n\n" + s
+	}
+	return d
+}
+
+// signature is the account's signature under its "-- " separator, ending
+// in a newline, or "" if it has none.
+func signature(acct *config.Account) string {
+	s := strings.Trim(strings.ReplaceAll(acct.Signature, "\r\n", "\n"), "\n")
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	return "-- \n" + s + "\n"
+}
+
+// signed puts the account's signature between the place to write and what
+// follows (the quote or the forwarded message), with a blank line after it.
+func signed(acct *config.Account) string {
+	if s := signature(acct); s != "" {
+		return "\n\n" + s + "\n"
+	}
+	return "\n\n"
 }
 
 // ReplyMode says who a reply goes to.
@@ -76,7 +99,7 @@ func Reply(acct *config.Account, orig *render.Message, mode ReplyMode) *Draft {
 	d.Subject = prefixed("Re: ", orig.Subject)
 	d.InReplyTo = orig.MessageID
 	d.References = references(orig)
-	d.Body = "\n\n" + attribution(orig) + "\n" + quote(orig.Text) + "\n"
+	d.Body = signed(acct) + attribution(orig) + "\n" + quote(orig.Text) + "\n"
 	return d
 }
 
@@ -86,7 +109,7 @@ func Forward(acct *config.Account, orig *render.Message, raw []byte) (*Draft, er
 	d := &Draft{From: identity(acct, ownRecipient(orig, acct.Addresses()))}
 	d.Subject = prefixed("Fwd: ", orig.Subject)
 	var b strings.Builder
-	b.WriteString("\n\n---------- Forwarded message ----------\n")
+	b.WriteString(signed(acct) + "---------- Forwarded message ----------\n")
 	fmt.Fprintf(&b, "From: %s\n", addressString(orig.From))
 	if !orig.Date.IsZero() {
 		fmt.Fprintf(&b, "Date: %s\n", formatDate(orig.Date))

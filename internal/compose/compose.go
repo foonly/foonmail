@@ -15,6 +15,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -87,7 +88,7 @@ func build(d *Draft, strict bool) ([]byte, error) {
 			header(f.key, f.value)
 			continue
 		}
-		list, err := mail.ParseAddressList(f.value)
+		list, err := mail.ParseAddressList(tidyList(f.value))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.key, err)
 		}
@@ -225,7 +226,8 @@ func BuildDraft(d *Draft) ([]byte, error) {
 		key   string
 		value *string
 	}{{"To", &lax.To}, {"Cc", &lax.Cc}, {"Bcc", &lax.Bcc}} {
-		v := strings.TrimSpace(*f.value)
+		v := tidyList(*f.value)
+		*f.value = v
 		if v == "" {
 			continue
 		}
@@ -255,6 +257,16 @@ func BuildDraft(d *Draft) ([]byte, error) {
 		fmt.Fprintf(&extra, "X-Foonmail-Draft-%s: %s\r\n", key, mime.QEncoding.Encode("utf-8", value))
 	}
 	return append(extra.Bytes(), raw...), nil
+}
+
+// emptyEntry matches separators with nothing between them.
+var emptyEntry = regexp.MustCompile(`,\s*(,\s*)+`)
+
+// tidyList drops the empty entries an address field picks up while
+// typing, such as the ", " left after a completed address.
+func tidyList(s string) string {
+	s = emptyEntry.ReplaceAllString(strings.TrimSpace(s), ", ")
+	return strings.TrimSpace(strings.Trim(s, ", "))
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

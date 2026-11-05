@@ -89,6 +89,7 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 	}
 	u := newUI(db, log)
 	u.account, u.accountID, u.own = acct, accountID, acct.Addresses()
+	u.autosavePath = filepath.Join(cfg.DataDir, "unsent-"+acct.Name+".json")
 	found := false
 	for _, f := range folders {
 		if f.Name == "INBOX" {
@@ -132,6 +133,7 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 	}
 	u.reload()
 	u.refreshStatus()
+	u.restoreUnsent()
 	return u, cleanup, nil
 }
 
@@ -203,6 +205,7 @@ func run(w *app.Window, u *ui) error {
 		}
 		switch e := ev.(type) {
 		case app.DestroyEvent:
+			u.autosave() // what was typed since the last autosave
 			return e.Err
 		case app.ConfigEvent:
 			// Looking at the window counts as looking at the mail.

@@ -32,6 +32,11 @@ There is also **foonmailctl**, a command-line tool for the daemon.
 - Writing in the window or in your own editor, with drafts, attachments,
   replies, reply-all and forwarding. Sent mail waits 10 seconds before it
   goes, so you can take it back.
+- Address suggestions in To, Cc and Bcc from the people you exchange mail
+  with, those you write to most and most recently first.
+- A signature per account, added to new messages, replies and forwards.
+- What you are writing is kept on disk as you type, and comes back if
+  foonmail is closed or crashes before you send or save it.
 - Attachments opened with your desktop's default app or saved to your
   download folder. Programs, scripts and web pages are only saved, never
   opened.
@@ -131,6 +136,7 @@ The bottom line of the window always shows the keys for what you're doing.
 
 | Writing | |
 |---|---|
+| ↑ / ↓, Tab or Enter | choose and fill in a suggested address |
 | Ctrl+Enter | send |
 | Ctrl+S | save to Drafts |
 | Ctrl+E | edit in your `$EDITOR` |

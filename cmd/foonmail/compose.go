@@ -40,7 +40,20 @@ type composer struct {
 	returnTo    mode
 	busy        bool // sending, picking files or in the external editor
 	discarding  bool // Esc was pressed once with something written
+
+	// Address suggestions for the entry being typed in suggField.
+	sugg      []contact
+	suggSel   int
+	suggField *widget.Editor
+	suggEntry string
+	suggOff   bool // Esc closed them until the next edit
+
+	dirty    bool      // changed since the last autosave
+	editedAt time.Time // the last change
 }
+
+// edited notes a change, for autosave.
+func (c *composer) edited(now time.Time) { c.dirty, c.editedAt = true, now }
 
 func (c *composer) draft() *compose.Draft {
 	d := *c.base
@@ -75,6 +88,7 @@ func (u *ui) startCompose(d *compose.Draft, answering *cache.Entry) {
 	}
 	c.set(d)
 	u.comp, u.mode = c, modeCompose
+	u.loadContacts()
 	if strings.TrimSpace(d.To) == "" {
 		u.focusReq = &c.to
 	} else {
@@ -172,6 +186,9 @@ func (u *ui) replyFromView(kind replyKind) {
 func (u *ui) leaveCompose() {
 	c := u.comp
 	u.comp = nil
+	// Sent, saved to Drafts or discarded: the copy kept in case of a crash
+	// has done its job.
+	u.removeAutosave()
 	u.mode = c.returnTo
 	switch u.mode {
 	case modeList:
@@ -264,6 +281,7 @@ func (u *ui) editExternally() {
 			default:
 				c.base.InReplyTo, c.base.References = nd.InReplyTo, nd.References
 				c.set(nd)
+				c.edited(u.now())
 				u.notice = "Updated from the external editor."
 			}
 		})
@@ -315,6 +333,7 @@ func (u *ui) pickFiles() {
 				for _, p := range paths {
 					c.attachments = append(c.attachments, compose.Attachment{Name: baseName(p), Path: p})
 				}
+				c.edited(u.now())
 				u.notice = fmt.Sprintf("Attached %d file(s).", len(paths))
 			}
 		})
@@ -332,6 +351,8 @@ func baseName(p string) string {
 
 func (u *ui) updateCompose(gtx layout.Context) {
 	c := u.comp
+	// The suggestion list takes its keys before the address field does.
+	u.suggestionKeys(gtx)
 	// Editor changes first: an edit made before an Esc must not cancel the
 	// "press Esc again" that follows it.
 	for _, e := range []*widget.Editor{&c.from, &c.to, &c.cc, &c.bcc, &c.subject, &c.body} {
@@ -342,10 +363,12 @@ func (u *ui) updateCompose(gtx layout.Context) {
 				break
 			}
 			if _, ok := ev.(widget.ChangeEvent); ok {
-				c.discarding = false
+				c.discarding, c.suggOff = false, false
+				c.edited(u.now())
 			}
 		}
 	}
+	u.updateSuggestions(gtx)
 	for {
 		ev, ok := gtx.Event(
 			key.Filter{Name: key.NameReturn, Required: key.ModCtrl},
@@ -382,6 +405,7 @@ func (u *ui) updateCompose(gtx layout.Context) {
 			if n := len(c.attachments); n > 0 {
 				u.notice = "Removed " + c.attachments[n-1].Name
 				c.attachments = c.attachments[:n-1]
+				c.edited(u.now())
 			}
 		case key.NameEscape:
 			if !c.changed() || c.discarding {
@@ -397,6 +421,10 @@ func (u *ui) updateCompose(gtx layout.Context) {
 
 func (u *ui) layoutCompose(gtx layout.Context) layout.Dimensions {
 	c := u.comp
+	hints := composeHints
+	if len(c.sugg) > 0 {
+		hints = "↑/↓ choose an address · Tab or Enter fills it in · Esc closes the list · Ctrl+Enter send"
+	}
 	title := "New message"
 	switch {
 	case c.base.InReplyTo != "":
@@ -415,8 +443,11 @@ func (u *ui) layoutCompose(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(header),
 		layout.Rigid(u.field("From", &c.from, "")),
 		layout.Rigid(u.field("To", &c.to, "name@example.com, …")),
+		layout.Rigid(u.suggestionList(&c.to)),
 		layout.Rigid(u.field("Cc", &c.cc, "")),
+		layout.Rigid(u.suggestionList(&c.cc)),
 		layout.Rigid(u.field("Bcc", &c.bcc, "")),
+		layout.Rigid(u.suggestionList(&c.bcc)),
 		layout.Rigid(u.field("Subject", &c.subject, "")),
 		layout.Rigid(u.divider),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -431,8 +462,9 @@ func (u *ui) layoutCompose(gtx layout.Context) layout.Dimensions {
 		}),
 		layout.Rigid(u.divider),
 		layout.Rigid(u.attachmentRow),
-		layout.Rigid(u.statusBar(composeHints)),
+		layout.Rigid(u.statusBar(hints)),
 	}
+	u.autosaveDue(gtx)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 }
 

@@ -165,3 +165,24 @@ func TestPathOverride(t *testing.T) {
 		t.Errorf("Path = %q", p)
 	}
 }
+
+func TestSignatureSetting(t *testing.T) {
+	example, err := os.ReadFile("../../config.example.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The example's signature, uncommented.
+	s := strings.NewReplacer(`# signature = """`, `signature = """`, "# Your Name\n", "Your Name\n",
+		"# example.com\n", "example.com\n", "# \"\"\"\n", "\"\"\"\n").Replace(string(example))
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(s), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Accounts[0].Signature; got != "Your Name\nexample.com\n" {
+		t.Errorf("signature %q", got)
+	}
+}

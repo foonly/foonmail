@@ -125,6 +125,8 @@ type ui struct {
 	pendingDelete string             // conversation key waiting for a second d in Trash
 	openURL       func(string) error // opens a link or a file; xdg-open
 	downloads     func() string      // where w saves attachments
+	contacts      []contact          // ranked correspondents, for address suggestions
+	autosavePath  string             // where the message being written is kept; "" for none
 	focusWindow   func()             // brings the window forward; hyprctl on Hyprland
 	focusReq      event.Tag
 

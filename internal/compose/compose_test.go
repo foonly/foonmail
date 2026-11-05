@@ -261,3 +261,45 @@ func TestDraftWithoutRecipientsOrWithTypos(t *testing.T) {
 		t.Errorf("half-typed fields: To %q, Cc %q", got.To, got.Cc)
 	}
 }
+
+func TestSignature(t *testing.T) {
+	a := acct()
+	if d := New(a); d.Body != "" {
+		t.Errorf("no signature: body %q", d.Body)
+	}
+	a.Signature = "Kim Ström\r\nexample.org\n\n"
+	if d := New(a); d.Body != "\n\n-- \nKim Ström\nexample.org\n" {
+		t.Errorf("new: %q", d.Body)
+	}
+	orig := &render.Message{From: []render.Address{{Name: "Bob", Addr: "bob@example.com"}}, Subject: "Hei", Text: "Torstaina?"}
+	if d := Reply(a, orig, ReplySender); d.Body != "\n\n-- \nKim Ström\nexample.org\n\nBob <bob@example.com> wrote:\n> Torstaina?\n" {
+		t.Errorf("reply: %q", d.Body)
+	}
+	d, err := Forward(a, orig, nil)
+	if err != nil || !strings.HasPrefix(d.Body, "\n\n-- \nKim Ström\nexample.org\n\n---------- Forwarded message") {
+		t.Errorf("forward: %q %v", d.Body, err)
+	}
+	// The separator survives building, so readers recognise the signature.
+	d = New(a)
+	d.To, d.Body = "bob@example.com", "Hei!"+d.Body
+	raw, err := Build(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := render.Render(raw, render.Options{})
+	if err != nil || m.Text != "Hei!\n\n-- \nKim Ström\nexample.org" {
+		t.Errorf("read back: %q %v", m.Text, err)
+	}
+}
+
+func TestTrailingCommaInAddresses(t *testing.T) {
+	d := New(acct())
+	d.To, d.Cc, d.Body = "Bob <bob@example.com>, ", ", liisa@example.fi,, ", "Hei"
+	raw, err := Build(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(raw); !strings.Contains(s, "To: \"Bob\" <bob@example.com>\r\n") || !strings.Contains(s, "Cc: <liisa@example.fi>\r\n") {
+		t.Errorf("headers:\n%s", s)
+	}
+}
