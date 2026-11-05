@@ -749,8 +749,20 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 					})
 				}))
 			}
-			if links := linkLines(r.Links, width); len(links) > 0 {
+			shown, hidden := shownLinks(r, text, spans)
+			if links := linkLines(shown, width); len(links) > 0 {
 				rows = append(rows, layout.Rigid(u.section("Links", links, true)))
+			}
+			if hidden > 0 {
+				what := fmt.Sprintf("%d more links in the quoted text · h shows them", hidden)
+				if hidden == 1 {
+					what = "1 more link in the quoted text · h shows it"
+				}
+				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					l := material.Label(u.th, u.th.TextSize*0.85, what)
+					l.Color = u.muted
+					return layout.Inset{Top: 2}.Layout(gtx, l.Layout)
+				}))
 			}
 			if atts := attachmentLines(r.Attachments); len(atts) > 0 {
 				rows = append(rows, layout.Rigid(u.section("Attachments", atts, false)))

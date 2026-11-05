@@ -136,3 +136,24 @@ func TestColoredTextLinesUp(t *testing.T) {
 		t.Errorf("%d red pixels, %d dark pixels inside the link's region %v", reds, dark, box)
 	}
 }
+
+func TestLinksInCollapsedQuotesAreNotListed(t *testing.T) {
+	body := "See https://new.example/ and https://both.example/\n\nOn Tue, Bob wrote:\n> Old https://old.example/\n> and https://both.example/\n"
+	raw := []byte("From: Kim <kim@example.org>\r\nContent-Type: text/plain\r\n\r\n" + strings.ReplaceAll(body, "\n", "\r\n"))
+	m, err := render.Render(raw, render.Options{LinkPlain: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Links) != 3 {
+		t.Fatalf("links %+v", m.Links)
+	}
+	text, spans := bodyView(m, false)
+	shown, hidden := shownLinks(m, text, spans)
+	if len(shown) != 2 || shown[0].N != 1 || shown[1].N != 2 || hidden != 1 {
+		t.Errorf("collapsed: shown %+v, hidden %d", shown, hidden)
+	}
+	text, spans = bodyView(m, true)
+	if shown, hidden := shownLinks(m, text, spans); len(shown) != 3 || hidden != 0 {
+		t.Errorf("expanded: shown %+v, hidden %d", shown, hidden)
+	}
+}

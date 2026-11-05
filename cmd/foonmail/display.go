@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -238,4 +239,41 @@ func displayName(a render.Address) string {
 		return a.Name
 	}
 	return a.Addr
+}
+
+// shownLinks are the links to list under a message: those mentioned in
+// the text as shown, leaving out ones mentioned only in collapsed quotes,
+// which hidden counts. text and spans are from bodyView.
+func shownLinks(m *render.Message, text string, spans []textSpan) (shown []render.Link, hidden int) {
+	visible := map[int]bool{}
+	for _, s := range spans {
+		if n, ok := spanNumber(text[s.start:s.end]); ok && s.kind == spanLink {
+			visible[n] = true
+		}
+	}
+	anywhere := map[int]bool{}
+	for _, s := range m.LinkSpans {
+		if n, ok := spanNumber(m.Text[s.Start:s.End]); ok {
+			anywhere[n] = true
+		}
+	}
+	for _, l := range m.Links {
+		// A link with no mention found is listed rather than lost.
+		if visible[l.N] || !anywhere[l.N] {
+			shown = append(shown, l)
+		} else {
+			hidden++
+		}
+	}
+	return shown, hidden
+}
+
+// spanNumber reads the "[N]" a link span ends with.
+func spanNumber(s string) (int, bool) {
+	i := strings.LastIndexByte(s, '[')
+	if i < 0 || !strings.HasSuffix(s, "]") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s[i+1 : len(s)-1])
+	return n, err == nil
 }
