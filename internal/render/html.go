@@ -71,9 +71,10 @@ type htmlConv struct {
 	lists       []listState
 	outlookRest bool // everything from here on is an Outlook-quoted original
 
-	links      []Link
-	linkNum    map[string]int
-	linkOffset int
+	links       []Link
+	linkNum     map[string]int
+	linkOffset  int
+	linkPending bool // a link's span starts at the next word
 }
 
 func htmlToText(src string, linkOffset int) converted {
@@ -199,15 +200,25 @@ func (c *htmlConv) children(n *html.Node) {
 // link writes the link's content followed by "[N]" for a followable URL.
 func (c *htmlConv) link(n *html.Node) {
 	before := c.written
+	c.linkPending = true // the next word written starts the link's span
 	c.children(n)
+	started := !c.linkPending
+	c.linkPending = false
+	cancel := func() {
+		if started {
+			c.cur.WriteString(markCancel)
+		}
+	}
 	href := strings.TrimSpace(attr(n, "href"))
 	u, err := url.Parse(href)
 	if err != nil || c.written == before {
+		cancel()
 		return
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https", "mailto", "ftp":
 	default:
+		cancel()
 		return // javascript:, #anchors, relative links
 	}
 	num, ok := c.linkNum[href]
@@ -218,11 +229,15 @@ func (c *htmlConv) link(n *html.Node) {
 	}
 	c.space = true
 	c.text("[" + strconv.Itoa(num) + "]")
+	if started {
+		c.cur.WriteString(markEnd)
+	}
 }
 
 // text writes a text node, collapsing whitespace outside <pre>.
 func (c *htmlConv) text(s string) {
 	s = invisible.Replace(s)
+	s = stripMarks(s)
 	if c.pre > 0 {
 		for i, part := range strings.Split(s, "\n") {
 			if i > 0 {
@@ -259,6 +274,10 @@ func (c *htmlConv) word(w string) {
 		c.cur.WriteByte(' ')
 	}
 	c.space = false
+	if c.linkPending {
+		c.cur.WriteString(markStart)
+		c.linkPending = false
+	}
 	c.cur.WriteString(w)
 	c.written += len(w)
 }

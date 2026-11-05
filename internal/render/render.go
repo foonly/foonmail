@@ -43,6 +43,10 @@ type Options struct {
 	// LinkOffset is added to link numbers, so the messages of a conversation
 	// shown together get distinct numbers: the first link is LinkOffset+1.
 	LinkOffset int
+	// LinkPlain numbers the web addresses in plain text like the links of
+	// converted HTML and shortens long ones, for display. Text quoted in a
+	// reply or edited as a draft wants them as written.
+	LinkPlain bool
 }
 
 // Address is a decoded mail address.
@@ -86,8 +90,11 @@ type Message struct {
 
 	Text   string // what to show; lines starting with ">" are quoted
 	Source Source
-	Links  []Link  // numbered links in Text (HTML only)
-	Quotes []Quote // quoted regions in Text
+	Links  []Link // numbered links in Text
+	// LinkSpans are where links are in Text: a link's text (or shortened
+	// address, for plain text) and its "[N]".
+	LinkSpans []TextSpan
+	Quotes    []Quote // quoted regions in Text
 
 	HasPlain, HasHTML bool
 	HTML              string // the decoded HTML part, for "open in browser"
@@ -149,7 +156,11 @@ func Render(raw []byte, opts Options) (*Message, error) {
 		m.Text, m.Source, m.Links = conv.text, SourceHTML, conv.links
 	case m.HasPlain:
 		m.Text, m.Source = tidy(plain), SourcePlain
+		if opts.LinkPlain {
+			m.Text, m.Links = linkifyPlain(m.Text, opts.LinkOffset)
+		}
 	}
+	m.Text, m.LinkSpans = extractSpans(m.Text)
 	m.Quotes = findQuotes(m.Text)
 	return m, nil
 }

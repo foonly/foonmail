@@ -1,0 +1,108 @@
+package render
+
+import (
+	"strings"
+	"testing"
+)
+
+func spanTexts(m *Message) []string {
+	var out []string
+	for _, s := range m.LinkSpans {
+		out = append(out, m.Text[s.Start:s.End])
+	}
+	return out
+}
+
+func TestPlainLinks(t *testing.T) {
+	long := "https://news.example.com/track/click?id=0123456789abcdef&campaign=autumn&utm_source=mail"
+	body := strings.Join([]string{
+		"See https://example.org/page.",
+		"Long: " + long,
+		"(also www.example.net/x) and <https://example.org/page>",
+		"> quoted https://quoted.example/",
+		"Not a link: example.com, ftp:// or https:",
+	}, "\n")
+	m := mustRender(t, raw([]string{"Content-Type: text/plain"}, body), Options{LinkPlain: true, LinkOffset: 2})
+
+	want := strings.Join([]string{
+		"See https://example.org/page [3].",
+		"Long: " + ShortURL(long, shownURLLength) + " [4]",
+		"(also www.example.net/x [5]) and https://example.org/page [3]",
+		"> quoted https://quoted.example/ [6]",
+		"Not a link: example.com, ftp:// or https:",
+	}, "\n")
+	if m.Text != want {
+		t.Errorf("text:\n got %q\nwant %q", m.Text, want)
+	}
+	urls := []string{"https://example.org/page", long, "https://www.example.net/x", "https://quoted.example/"}
+	if len(m.Links) != len(urls) {
+		t.Fatalf("links %+v", m.Links)
+	}
+	for i, l := range m.Links {
+		if l.N != i+3 || l.URL != urls[i] {
+			t.Errorf("link %d = %+v, want [%d] %s", i, l, i+3, urls[i])
+		}
+	}
+	spans := spanTexts(m)
+	wantSpans := []string{
+		"https://example.org/page [3]",
+		ShortURL(long, shownURLLength) + " [4]",
+		"www.example.net/x [5]",
+		"https://example.org/page [3]",
+		"https://quoted.example/ [6]",
+	}
+	if strings.Join(spans, "|") != strings.Join(wantSpans, "|") {
+		t.Errorf("spans:\n got %q\nwant %q", spans, wantSpans)
+	}
+	if len(m.Quotes) != 1 {
+		t.Errorf("quotes %+v", m.Quotes)
+	}
+}
+
+func TestPlainLinksOnlyWhenAsked(t *testing.T) {
+	body := "Go to https://example.org/a-rather-long-address/that/goes/on/and/on/for/a/while"
+	m := mustRender(t, raw([]string{"Content-Type: text/plain"}, body), Options{})
+	if m.Text != body || len(m.Links) != 0 || len(m.LinkSpans) != 0 {
+		t.Errorf("text %q, links %+v, spans %+v", m.Text, m.Links, m.LinkSpans)
+	}
+}
+
+func TestHTMLLinkSpans(t *testing.T) {
+	m := mustRender(t, raw([]string{"Content-Type: text/html"},
+		`<p>Read <a href="https://example.org/">the full story</a> or <a href="#top">go up</a>.</p>`+
+			`<blockquote>Old <a href="https://old.example/">link</a></blockquote>`),
+		Options{})
+	got := spanTexts(m)
+	want := []string{"the full story [1]", "link [2]"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("text %q\nspans %q, want %q", m.Text, got, want)
+	}
+	if strings.ContainsAny(m.Text, markStart+markEnd+markCancel) {
+		t.Errorf("marks left in %q", m.Text)
+	}
+}
+
+func TestMarksInMailAreIgnored(t *testing.T) {
+	for _, ct := range []string{"text/plain", "text/html"} {
+		m := mustRender(t, raw([]string{"Content-Type: " + ct + "; charset=utf-8"},
+			"fake"+markStart+"span"+markEnd+" here"), Options{LinkPlain: true})
+		if m.Text != "fakespan here" || len(m.LinkSpans) != 0 {
+			t.Errorf("%s: text %q, spans %+v", ct, m.Text, m.LinkSpans)
+		}
+	}
+}
+
+func TestTrimURL(t *testing.T) {
+	cases := []struct{ in, url, tail string }{
+		{"https://x.example/a.", "https://x.example/a", "."},
+		{"https://x.example/a_(b)", "https://x.example/a_(b)", ""},
+		{"https://x.example/a)", "https://x.example/a", ")"},
+		{"https://x.example/a).", "https://x.example/a", ")."},
+		{"https://x.example/?q=1&r=2", "https://x.example/?q=1&r=2", ""},
+	}
+	for _, c := range cases {
+		if url, tail := trimURL(c.in); url != c.url || tail != c.tail {
+			t.Errorf("trimURL(%q) = %q, %q; want %q, %q", c.in, url, tail, c.url, c.tail)
+		}
+	}
+}
