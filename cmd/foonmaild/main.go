@@ -76,7 +76,7 @@ func run(configPath string, log *slog.Logger) error {
 	// Warn about missing passwords up front, but keep going: the keyring may
 	// still be locked at login, and the sync loops retry.
 	for i := range cfg.Accounts {
-		if _, err := password(cfg.Accounts[i].IMAP); err != nil {
+		if _, err := passwords(cfg)(cfg.Accounts[i].IMAP); err != nil {
 			log.Warn("password not available yet", "account", cfg.Accounts[i].Name, "err", err)
 		}
 	}
@@ -97,7 +97,7 @@ func run(configPath string, log *slog.Logger) error {
 			Account:  acct,
 			DB:       db,
 			Log:      log,
-			Password: password,
+			Password: passwords(cfg),
 			Notify:   h.notify,
 		})
 		if err != nil {
@@ -110,7 +110,7 @@ func run(configPath string, log *slog.Logger) error {
 
 	// The outbox lives in the data directory: unsent mail can't be rebuilt
 	// from the server. Without it the daemon still syncs.
-	sender := &outbox.SMTP{Password: password}
+	sender := &outbox.SMTP{Password: passwords(cfg)}
 	ob, err := outbox.Open(outbox.Options{
 		DataDir:  cfg.DataDir,
 		Accounts: cfg.Accounts,
@@ -189,14 +189,32 @@ func connectDesktop(h *hub, conn *dbus.Conn, log *slog.Logger) (closeDesktop fun
 	}
 }
 
-// password reads a server's password from the Secret Service keyring.
-func password(s config.Server) (string, error) {
-	service, user := s.SecretService()
-	p, err := keyring.Get(service, user)
-	if errors.Is(err, keyring.ErrNotFound) {
+// passwords reads servers' passwords from the Secret Service keyring. An
+// SMTP server on another host than its account's IMAP server (Gmail's
+// smtp.gmail.com and imap.gmail.com) uses the IMAP password when it has
+// none of its own and the same username, so one entry does for both.
+func passwords(cfg *config.Config) func(config.Server) (string, error) {
+	return func(s config.Server) (string, error) {
+		p, err := password(s)
+		if !errors.Is(err, keyring.ErrNotFound) {
+			return p, err
+		}
+		for _, a := range cfg.Accounts {
+			if a.SMTP == s && a.IMAP.Host != s.Host && a.IMAP.Username == s.Username {
+				if p, ierr := password(a.IMAP); ierr == nil {
+					return p, nil
+				}
+			}
+		}
+		service, user := s.SecretService()
 		return "", fmt.Errorf("no password in the keyring for %s on %s; store it with: "+
 			"secret-tool store --label='foonmail: %s on %s' service %s username %s",
 			user, s.Host, user, s.Host, service, user)
 	}
-	return p, err
+}
+
+// password reads a server's password from the Secret Service keyring.
+func password(s config.Server) (string, error) {
+	service, user := s.SecretService()
+	return keyring.Get(service, user)
 }

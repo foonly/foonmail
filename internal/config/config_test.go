@@ -186,3 +186,33 @@ func TestSignatureSetting(t *testing.T) {
 		t.Errorf("signature %q", got)
 	}
 }
+
+func TestGmailDefaults(t *testing.T) {
+	c, err := Load(write(t, `
+[[account]]
+name = "gmail"
+email = "kim@gmail.com"
+[account.imap]
+host = "imap.gmail.com"
+username = "kim@gmail.com"
+[account.smtp]
+host = "smtp.gmail.com"
+
+[[account]]
+name = "home"
+email = "me@example.org"
+[account.imap]
+host = "mail.example.org"
+username = "me"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, h := c.Accounts[0], c.Accounts[1]
+	if !g.IsGmail() || *g.AppendSent || g.SMTP.Username != "kim@gmail.com" || g.SMTP.Port != 465 {
+		t.Errorf("gmail: %+v", g)
+	}
+	if h.IsGmail() || !*h.AppendSent {
+		t.Errorf("home: %+v", h)
+	}
+}

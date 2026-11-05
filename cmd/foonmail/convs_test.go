@@ -148,3 +148,30 @@ func TestFolderOrder(t *testing.T) {
 		t.Errorf("flagged archive and INBOX.Sent:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Gmail: special folders under the unlisted "[Gmail]" parent, All Mail as
+// the archive, and labels nested under labels.
+func TestGmailFolderOrder(t *testing.T) {
+	var id int64
+	f := func(name, special string) cache.Folder {
+		id++
+		return cache.Folder{ID: id, Name: name, Delimiter: "/", SpecialUse: special, UIDValidity: 1}
+	}
+	folders := []cache.Folder{
+		f("INBOX", ""), f("[Gmail]/All Mail", `\All`), f("[Gmail]/Drafts", `\Drafts`), f("[Gmail]/Important", `\Important`),
+		f("[Gmail]/Sent Mail", `\Sent`), f("[Gmail]/Spam", `\Junk`), f("[Gmail]/Starred", `\Flagged`),
+		f("[Gmail]/Trash", `\Trash`), f("Receipts", ""), f("Receipts/2026", ""), f("Travel/Trains", ""),
+	}
+	var out []string
+	for _, r := range folderRows(folders, nil, 2026) {
+		out = append(out, strings.Repeat("  ", r.depth)+r.label)
+	}
+	want := "INBOX|Drafts|Sent Mail|All Mail|Spam|Trash|Important|Starred|Receipts|  2026|Travel/Trains"
+	if got := strings.Join(out, "|"); got != want {
+		t.Errorf("order:\n got %s\nwant %s", got, want)
+	}
+	special, _ := specialFolders(folders, 2026)
+	if special[`\Archive`].Name != "[Gmail]/All Mail" {
+		t.Errorf("archive = %q", special[`\Archive`].Name)
+	}
+}

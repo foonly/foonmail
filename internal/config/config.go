@@ -70,6 +70,13 @@ type Server struct {
 	Username string   `toml:"username"`
 }
 
+// IsGmail reports whether the account is on Gmail (or Google Workspace),
+// which files sent mail itself and archives to All Mail.
+func (a *Account) IsGmail() bool {
+	h := strings.ToLower(strings.TrimSuffix(a.IMAP.Host, "."))
+	return h == "imap.gmail.com" || h == "imap.googlemail.com"
+}
+
 // Address is host:port.
 func (s Server) Address() string { return fmt.Sprintf("%s:%d", s.Host, s.Port) }
 
@@ -172,7 +179,8 @@ func (c *Config) applyDefaults() error {
 	for i := range c.Accounts {
 		a := &c.Accounts[i]
 		if a.AppendSent == nil {
-			a.AppendSent = ptr(true)
+			// Gmail files sent mail in Sent Mail itself; a copy would show twice.
+			a.AppendSent = ptr(!a.IsGmail())
 		}
 		if a.NotifyDetails == nil {
 			a.NotifyDetails = ptr(true)

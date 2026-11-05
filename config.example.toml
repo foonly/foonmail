@@ -51,3 +51,20 @@ username = "you"
 # refer to folders by their special-use flag instead of their name.
 # watched = ["@sent"]
 # poll_interval = "5m"
+
+# A Gmail account. Gmail needs an app password (with 2-Step Verification
+# on: myaccount.google.com/apppasswords), stored once for imap.gmail.com;
+# SMTP uses the same entry. Sent mail isn't copied to Sent Mail (Gmail
+# does that itself), and archiving moves mail to All Mail.
+#
+# [[account]]
+# name = "gmail"
+# email = "you@gmail.com"
+# display_name = "Your Name"
+#
+# [account.imap]
+# host = "imap.gmail.com"
+# username = "you@gmail.com"
+#
+# [account.smtp]
+# host = "smtp.gmail.com"

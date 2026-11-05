@@ -137,11 +137,30 @@ func folderRows(folders []cache.Folder, counts map[int64]cache.Counts, year int)
 		}
 		group(f, label)
 	}
+	// The rest, indented under the parents that are listed. A parent that
+	// can't be opened isn't in the cache: its folders sit at its level, with
+	// its name in their label ("Travel/Trains"), unless it is a system name
+	// in brackets like Gmail's "[Gmail]".
+	names := map[string]bool{}
+	for _, f := range sorted {
+		names[f.Name] = true
+	}
 	for _, f := range sorted {
 		if !placed[f.ID] {
-			// The top of a remaining tree: depth counts from the top level.
 			p := parts(f)
-			rows = append(rows, folderRow{folder: f, label: p[len(p)-1], depth: len(p) - 1, counts: counts[f.ID]})
+			depth, from := 0, 0
+			for i := 1; i < len(p); i++ {
+				if names[strings.Join(p[:i], f.Delimiter)] {
+					depth, from = depth+1, i
+				}
+			}
+			var label []string
+			for _, part := range p[from:] {
+				if !(strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]")) || part == p[len(p)-1] {
+					label = append(label, part)
+				}
+			}
+			rows = append(rows, folderRow{folder: f, label: strings.Join(label, f.Delimiter), depth: depth, counts: counts[f.ID]})
 			placed[f.ID] = true
 		}
 	}
@@ -489,6 +508,16 @@ func specialFolders(folders []cache.Folder, year int) (special map[string]cache.
 		for _, f := range folders {
 			top := f.Delimiter == "" || !strings.Contains(f.Name, f.Delimiter)
 			if top && (strings.EqualFold(f.Name, "Archive") || strings.EqualFold(f.Name, "Archives")) {
+				special[`\Archive`] = f
+				break
+			}
+		}
+	}
+	if _, ok := special[`\Archive`]; !ok {
+		// Gmail has no archive folder: archiving takes mail out of the Inbox,
+		// leaving it in All Mail, which is what a move there does.
+		for _, f := range folders {
+			if f.SpecialUse == `\All` {
 				special[`\Archive`] = f
 				break
 			}

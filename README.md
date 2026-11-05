@@ -107,6 +107,21 @@ secret-tool store --label='foonmail: you on mail.example.com' \
     service foonmail/mail.example.com username you
 ```
 
+### Gmail
+
+Gmail works with an app password: turn on 2-Step Verification, create one
+at <https://myaccount.google.com/apppasswords>, and store it for the IMAP
+server (SMTP uses the same entry):
+
+```sh
+secret-tool store --label='foonmail: you@gmail.com on imap.gmail.com' \
+    service foonmail/imap.gmail.com username you@gmail.com
+```
+
+`config.example.toml` has the account settings. foonmail doesn't copy sent
+mail to Sent Mail, since Gmail does that itself, and archiving (a) moves
+mail to All Mail, which takes it out of the Inbox.
+
 The cache lives in `~/.cache/foonmail` and can be deleted; it is rebuilt
 from the server. The outbox lives in `~/.local/share/foonmail`.
 
