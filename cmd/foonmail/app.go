@@ -280,16 +280,16 @@ func (u *ui) open() {
 
 	toMark := c.folderUIDs(u.folder.ID, true)
 	go func() {
-		offset := 0
+		var earlier []render.Link // the same address keeps its number across messages
 		anyShown := false
 		for _, p := range o.parts {
 			raw, err := u.loadRaw(p.entry.Summary)
 			var r *render.Message
 			if err == nil {
-				r, err = render.Render(raw, render.Options{LinkOffset: offset, LinkPlain: true})
+				r, err = render.Render(raw, render.Options{Earlier: earlier, LinkPlain: true})
 			}
 			if r != nil {
-				offset += len(r.Links)
+				earlier = append(earlier, r.Links...)
 				anyShown = true
 			}
 			u.post(func() { p.loading, p.rendered, p.err = false, r, err })

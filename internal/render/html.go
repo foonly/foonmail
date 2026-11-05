@@ -71,21 +71,19 @@ type htmlConv struct {
 	lists       []listState
 	outlookRest bool // everything from here on is an Outlook-quoted original
 
-	links       []Link
-	linkNum     map[string]int
-	linkOffset  int
+	links       *numberer
 	linkPending bool // a link's span starts at the next word
 }
 
-func htmlToText(src string, linkOffset int) converted {
+func htmlToText(src string, links *numberer) converted {
 	doc, err := html.Parse(strings.NewReader(src))
 	if err != nil {
 		return converted{text: tidy(src)}
 	}
-	c := &htmlConv{linkNum: map[string]int{}, linkOffset: linkOffset}
+	c := &htmlConv{links: links}
 	c.node(doc)
 	c.endLine()
-	return converted{text: c.render(), links: c.links}
+	return converted{text: c.render(), links: links.links}
 }
 
 func (c *htmlConv) node(n *html.Node) {
@@ -221,12 +219,7 @@ func (c *htmlConv) link(n *html.Node) {
 		cancel()
 		return // javascript:, #anchors, relative links
 	}
-	num, ok := c.linkNum[href]
-	if !ok {
-		num = c.linkOffset + len(c.links) + 1
-		c.linkNum[href] = num
-		c.links = append(c.links, Link{N: num, URL: href})
-	}
+	num := c.links.number(href)
 	c.space = true
 	c.text("[" + strconv.Itoa(num) + "]")
 	if started {

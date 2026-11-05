@@ -43,6 +43,10 @@ type Options struct {
 	// LinkOffset is added to link numbers, so the messages of a conversation
 	// shown together get distinct numbers: the first link is LinkOffset+1.
 	LinkOffset int
+	// Earlier are the links numbered in the messages shown above this one.
+	// A link to the same address keeps its number, and new links are
+	// numbered after them.
+	Earlier []Link
 	// LinkPlain numbers the web addresses in plain text like the links of
 	// converted HTML and shortens long ones, for display. Text quoted in a
 	// reply or edited as a draft wants them as written.
@@ -148,7 +152,7 @@ func Render(raw []byte, opts Options) (*Message, error) {
 	var conv converted
 	if m.HasHTML {
 		m.HTML = html
-		conv = htmlToText(html, opts.LinkOffset)
+		conv = htmlToText(html, newNumberer(opts))
 	}
 
 	switch {
@@ -157,7 +161,7 @@ func Render(raw []byte, opts Options) (*Message, error) {
 	case m.HasPlain:
 		m.Text, m.Source = tidy(plain), SourcePlain
 		if opts.LinkPlain {
-			m.Text, m.Links = linkifyPlain(m.Text, opts.LinkOffset)
+			m.Text, m.Links = linkifyPlain(m.Text, newNumberer(opts))
 		}
 	}
 	m.Text, m.LinkSpans = extractSpans(m.Text)

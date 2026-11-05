@@ -63,39 +63,80 @@ const shownURLLength = 40
 
 var plainURL = regexp.MustCompile(`<?(?:https?://|www\.)[^\s<>"'` + "`" + `]+>?`)
 
+// numberer numbers a message's links: one number per address, reusing
+// the numbers of earlier messages in the conversation, new ones after the
+// highest so far.
+type numberer struct {
+	nums  map[string]int
+	next  int
+	links []Link // this message's, in order of first appearance
+	seen  map[string]bool
+}
+
+func newNumberer(opts Options) *numberer {
+	n := &numberer{nums: map[string]int{}, seen: map[string]bool{}, next: opts.LinkOffset + 1}
+	for _, l := range opts.Earlier {
+		if _, ok := n.nums[l.URL]; !ok {
+			n.nums[l.URL] = l.N
+		}
+		n.next = max(n.next, l.N+1)
+	}
+	return n
+}
+
+// number returns the address's number, listing it among this message's
+// links the first time it appears here.
+func (n *numberer) number(url string) int {
+	num, ok := n.nums[url]
+	if !ok {
+		num = n.next
+		n.next++
+		n.nums[url] = num
+	}
+	if !n.seen[url] {
+		n.seen[url] = true
+		n.links = append(n.links, Link{N: num, URL: url})
+	}
+	return num
+}
+
 // linkifyPlain numbers the web addresses in plain text like the links of
 // converted HTML: each gets "[N]" after it and an entry in the link list,
 // and long ones are shortened in the text, keeping their host. The
 // addresses are marked as link spans.
-func linkifyPlain(text string, linkOffset int) (string, []Link) {
-	var links []Link
-	nums := map[string]int{}
-	out := plainURL.ReplaceAllStringFunc(stripMarks(text), func(m string) string {
+func linkifyPlain(text string, nums *numberer) (string, []Link) {
+	text = stripMarks(text)
+	var b strings.Builder
+	last := 0
+	for _, loc := range plainURL.FindAllStringIndex(text, -1) {
+		m := text[loc[0]:loc[1]]
 		bracketed := strings.HasPrefix(m, "<") && strings.HasSuffix(m, ">")
+		if strings.HasPrefix(m, "<") && !bracketed {
+			continue // a stray <, not an address in brackets
+		}
 		raw := strings.TrimSuffix(strings.TrimPrefix(m, "<"), ">")
 		url, tail := trimURL(raw)
 		if bracketed {
 			tail = "" // the closing > belongs to the address
-		} else if strings.HasPrefix(m, "<") {
-			return m // a stray <, not an address in brackets
 		}
 		target := url
 		if strings.HasPrefix(target, "www.") {
 			target = "https://" + target
 		}
-		n, ok := nums[target]
-		if !ok {
-			n = linkOffset + len(links) + 1
-			nums[target] = n
-			links = append(links, Link{N: n, URL: target})
-		}
 		shown := url
 		if utf8.RuneCountInString(url) > shownURLLength {
 			shown = ShortURL(target, shownURLLength)
 		}
-		return markStart + shown + " [" + strconv.Itoa(n) + "]" + markEnd + tail
-	})
-	return out, links
+		b.WriteString(text[last:loc[0]])
+		// "Android<https://…>": the brackets kept the address apart.
+		if bracketed && loc[0] > 0 && !strings.ContainsAny(text[loc[0]-1:loc[0]], " \t\n(") {
+			b.WriteByte(' ')
+		}
+		b.WriteString(markStart + shown + " [" + strconv.Itoa(nums.number(target)) + "]" + markEnd + tail)
+		last = loc[1]
+	}
+	b.WriteString(text[last:])
+	return b.String(), nums.links
 }
 
 // trimURL separates punctuation that ends a sentence from an address, and

@@ -106,3 +106,34 @@ func TestTrimURL(t *testing.T) {
 		}
 	}
 }
+
+// A conversation's messages share numbers for the same address.
+func TestEarlierLinksKeepTheirNumbers(t *testing.T) {
+	earlier := []Link{{N: 1, URL: "https://www.example.fi"}, {N: 2, URL: "https://a.example/"}}
+	plain := mustRender(t, raw([]string{"Content-Type: text/plain"},
+		"New https://b.example/ and old www.example.fi again, www.example.fi"),
+		Options{LinkPlain: true, Earlier: earlier})
+	if want := "New https://b.example/ [3] and old www.example.fi [1] again, www.example.fi [1]"; plain.Text != want {
+		t.Errorf("plain:\n got %q\nwant %q", plain.Text, want)
+	}
+	if len(plain.Links) != 2 || plain.Links[0] != (Link{3, "https://b.example/"}) || plain.Links[1] != (Link{1, "https://www.example.fi"}) {
+		t.Errorf("plain links %+v", plain.Links)
+	}
+
+	html := mustRender(t, raw([]string{"Content-Type: text/html"},
+		`<a href="https://a.example/">a</a> <a href="https://c.example/">c</a>`),
+		Options{Earlier: append(earlier, plain.Links...)})
+	if html.Text != "a [2] c [4]" || len(html.Links) != 2 || html.Links[1].N != 4 {
+		t.Errorf("html: %q %+v", html.Text, html.Links)
+	}
+}
+
+func TestBracketedAddressGetsSpace(t *testing.T) {
+	m := mustRender(t, raw([]string{"Content-Type: text/plain"},
+		"Skickat från Outlook för Android<https://aka.example/AAb9ysg>\n(<https://x.example/>)"),
+		Options{LinkPlain: true})
+	want := "Skickat från Outlook för Android https://aka.example/AAb9ysg [1]\n(https://x.example/ [2])"
+	if m.Text != want {
+		t.Errorf("got %q\nwant %q", m.Text, want)
+	}
+}
