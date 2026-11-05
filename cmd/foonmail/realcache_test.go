@@ -48,6 +48,13 @@ func TestRealCacheGrouping(t *testing.T) {
 		if len(c.members) > 1 {
 			multi++
 		}
+		seen := map[string]bool{}
+		for _, m := range c.members {
+			if m.MessageID != "" && seen[m.MessageID] {
+				t.Errorf("conversation %q shows message %q twice", c.subject, m.MessageID)
+			}
+			seen[m.MessageID] = true
+		}
 	}
 	t.Logf("%d messages loaded in %s, grouped into %d conversations (%d with several messages) in %s",
 		len(entries), loaded.Round(time.Millisecond), len(convs), multi, grouped.Round(time.Millisecond))

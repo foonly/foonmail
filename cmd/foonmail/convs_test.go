@@ -57,6 +57,42 @@ func TestBuildConversations(t *testing.T) {
 	}
 }
 
+func TestDeliveredCopyOfOwnMailIsOneMessage(t *testing.T) {
+	const inbox, sent = 1, 2
+	// The cache keeps them apart (different sizes), but they share a Message-ID.
+	entries := []cache.Entry{
+		entry(10, inbox, 20, "self", "", "Me", "foonmail test", 9),
+		entry(11, sent, 60, "self", "", "Me", "foonmail test", 9, `\Seen`),
+		// Reply-all that included me: Bob's reply, my reply-all, and its
+		// copy delivered back to me.
+		entry(12, inbox, 21, "q", "", "Bob Example", "Plan", 10, `\Seen`),
+		entry(13, sent, 61, "r", "q", "Me", "Re: Plan", 11, `\Seen`),
+		entry(14, inbox, 22, "r", "q", "Me", "Re: Plan", 11),
+	}
+	for _, folder := range []int64{inbox, sent} {
+		cs := buildConversations(entries, folder, []string{"niklas@uplink.fi"})
+		if len(cs) != 2 {
+			t.Fatalf("folder %d: %d conversations, want 2", folder, len(cs))
+		}
+		for _, c := range cs {
+			seen := map[string]bool{}
+			for _, m := range c.members {
+				if seen[m.MessageID] {
+					t.Errorf("folder %d: %q appears twice in %q", folder, m.MessageID, c.subject)
+				}
+				seen[m.MessageID] = true
+				if m.MessageID != "q" && m.FolderID != folder {
+					t.Errorf("folder %d: showing the copy from folder %d of %q", folder, m.FolderID, m.MessageID)
+				}
+			}
+		}
+	}
+	plan := buildConversations(entries, inbox, nil)[0]
+	if plan.subject != "Plan" || len(plan.members) != 2 || plan.unread != 1 {
+		t.Errorf("reply-all conversation in INBOX = %+v", plan)
+	}
+}
+
 func TestBaseSubject(t *testing.T) {
 	cases := map[string]string{
 		"Re: Re: Kahvi?":       "Kahvi?",

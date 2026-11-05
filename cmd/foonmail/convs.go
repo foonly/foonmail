@@ -47,13 +47,22 @@ func buildConversations(entries []cache.Entry, folderID int64, own []string) []c
 	}
 	var out []conversation
 	for _, group := range thread.Group(msgs) {
-		// A message in both folders (mail to yourself) is one message; show
-		// its copy in the current folder.
-		byID := map[int64]cache.Entry{}
+		// A message in both folders is one message; show its copy in the
+		// current folder. That covers mail to yourself and reply-all that
+		// includes you: the delivered copy has the Sent copy's Message-ID
+		// but extra headers (Received: and so on), so the cache stores two
+		// messages. Matching on Message-ID only within a conversation, where
+		// the threading headers already tie them together, can't merge
+		// unrelated mail.
+		byID := map[string]cache.Entry{}
 		for _, i := range group {
 			e := entries[i]
-			if prev, ok := byID[e.ID]; !ok || (prev.FolderID != folderID && e.FolderID == folderID) {
-				byID[e.ID] = e
+			k := e.MessageID
+			if k == "" {
+				k = fmt.Sprintf("#%d", e.ID)
+			}
+			if prev, ok := byID[k]; !ok || (prev.FolderID != folderID && e.FolderID == folderID) {
+				byID[k] = e
 			}
 		}
 		c := conversation{}
