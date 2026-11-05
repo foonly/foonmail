@@ -46,6 +46,9 @@ type mailKey struct {
 type openRequest struct {
 	account string
 	uid     uint32
+	// seen only clears what is new: the user is already looking. The GUI
+	// acknowledges when it comes forward, so opening it again would loop.
+	seen bool
 }
 
 type accountState struct {
@@ -128,6 +131,15 @@ func (h *hub) notify(ev imapsync.Event) { h.events <- ev }
 func (h *hub) activate() {
 	select {
 	case h.opens <- openRequest{}:
+	default:
+	}
+}
+
+// acknowledge is the GUI saying the user is looking: nothing is new any
+// more, and the GUI is already showing.
+func (h *hub) acknowledge() {
+	select {
+	case h.opens <- openRequest{seen: true}:
 	default:
 	}
 }
@@ -293,7 +305,7 @@ func (h *hub) pruneRead(ctx context.Context, account string, a *accountState) {
 // forward), starting through D-Bus activation if it isn't running.
 func (h *hub) open(req openRequest) {
 	clear(h.newMail)
-	if h.gui == nil {
+	if h.gui == nil || req.seen {
 		return
 	}
 	var folder int64
@@ -339,7 +351,7 @@ func (h *hub) flush() {
 			h.send(&notify.Notification{
 				Summary: displayName(m.Envelope.From),
 				Body:    subjectOrNone(m.Envelope.Subject),
-			}, openRequest{m.Account, m.UID})
+			}, openRequest{account: m.Account, uid: m.UID})
 		}
 	}
 }

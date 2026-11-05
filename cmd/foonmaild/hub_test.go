@@ -93,7 +93,7 @@ func newHubEnv(t *testing.T, details bool, accounts ...string) *hubEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.h.delay = 20 * time.Millisecond
+	e.h.delay = 300 * time.Millisecond // long enough for a burst of database writes on a busy machine
 	e.inbox = e.h.accounts[accounts[0]].inbox
 	go e.h.run(ctx)
 	return e

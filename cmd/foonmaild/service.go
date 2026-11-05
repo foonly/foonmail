@@ -138,7 +138,7 @@ func (m methods) SetFlags(folderID int64, uids []uint32, add, remove []string) *
 }
 
 func (m methods) Acknowledge() *dbus.Error {
-	m.s.hub.activate()
+	m.s.hub.acknowledge()
 	return nil
 }
 

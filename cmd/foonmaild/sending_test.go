@@ -201,3 +201,22 @@ func TestClicksOpenTheGUI(t *testing.T) {
 	e.h.activate() // the tray
 	e.eventually("GUI raised from the tray", func() bool { return slices.Contains(gui.all(), "show") })
 }
+
+// The GUI acknowledges when it comes forward; opening it again for that
+// made the two call each other without end.
+func TestAcknowledgeDoesNotOpenTheGUI(t *testing.T) {
+	e := newHubEnv(t, true)
+	gui := &fakeGUI{}
+	e.h.gui = gui
+	e.arrive(9, "bob@example.com", "Hi", false)
+	e.eventually("notification", func() bool { return len(e.notes.all()) == 1 })
+	e.h.acknowledge()
+	e.eventually("new mail cleared", func() bool {
+		st, err := e.h.status(context.Background())
+		return err == nil && st[0].New == 0
+	})
+	time.Sleep(50 * time.Millisecond)
+	if calls := gui.all(); len(calls) != 0 {
+		t.Errorf("acknowledging opened the GUI: %v", calls)
+	}
+}
