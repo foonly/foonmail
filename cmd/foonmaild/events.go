@@ -12,6 +12,7 @@ import (
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
 	"foonmail/internal/notify"
+	"foonmail/internal/outbox"
 	"foonmail/internal/rpc"
 	"foonmail/internal/tray"
 )
@@ -81,17 +82,27 @@ type hub struct {
 
 	statusReq  chan chan []rpc.AccountStatus
 	lastStatus []rpc.AccountStatus
+
+	outbox       outboxControl // nil until the outbox is open
+	undoWindow   time.Duration
+	outboxEvents chan outbox.Event
+	undoResults  chan undoResult
+	sendNotes    map[int64]uint32 // outbox id → its notification
 }
 
 func newHub(ctx context.Context, cfg *config.Config, db *cache.DB, n notifier, t trayIcon, log *slog.Logger) (*hub, error) {
 	h := &hub{
 		log: log, db: db, notifier: n, tray: t, delay: burstDelay,
-		accounts:  map[string]*accountState{},
-		newMail:   map[mailKey]bool{},
-		events:    make(chan imapsync.Event, 256),
-		opens:     make(chan openRequest, 8),
-		closed:    make(chan uint32, 8),
-		statusReq: make(chan chan []rpc.AccountStatus),
+		accounts:     map[string]*accountState{},
+		newMail:      map[mailKey]bool{},
+		events:       make(chan imapsync.Event, 256),
+		opens:        make(chan openRequest, 8),
+		closed:       make(chan uint32, 8),
+		statusReq:    make(chan chan []rpc.AccountStatus),
+		outboxEvents: make(chan outbox.Event, 64),
+		undoResults:  make(chan undoResult, 8),
+		sendNotes:    map[int64]uint32{},
+		undoWindow:   10 * time.Second,
 	}
 	for i := range cfg.Accounts {
 		a := &cfg.Accounts[i]
@@ -124,6 +135,7 @@ func (h *hub) activate() {
 type emitter interface {
 	FolderChanged(folderID int64)
 	StatusChanged()
+	OutboxChanged()
 }
 
 // status returns every account's state, for the D-Bus Status method.
@@ -179,6 +191,15 @@ func (h *hub) run(ctx context.Context) {
 		select {
 		case reply := <-h.statusReq:
 			reply <- h.snapshot()
+			continue
+		case ev := <-h.outboxEvents:
+			h.handleOutbox(ev)
+			if h.signals != nil {
+				h.signals.OutboxChanged()
+			}
+			continue
+		case r := <-h.undoResults:
+			h.handleUndoResult(r)
 			continue
 		case ev := <-h.events:
 			if fc, ok := ev.(imapsync.FolderChanged); ok {

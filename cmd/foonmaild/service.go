@@ -13,6 +13,7 @@ import (
 
 	"foonmail/internal/cache"
 	"foonmail/internal/imapsync"
+	"foonmail/internal/outbox"
 	"foonmail/internal/rpc"
 )
 
@@ -31,12 +32,13 @@ type service struct {
 	db       *cache.DB
 	backends map[int64]backend // by cache account id
 	hub      *hub
+	outbox   outboxAPI // nil when the outbox couldn't be opened
 	log      *slog.Logger
 }
 
 // exportService puts the daemon's interface on conn and claims rpc.BusName.
-func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, h *hub, log *slog.Logger) (*service, error) {
-	s := &service{conn: conn, db: db, backends: backends, hub: h, log: log}
+func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob outboxAPI, h *hub, log *slog.Logger) (*service, error) {
+	s := &service{conn: conn, db: db, backends: backends, outbox: ob, hub: h, log: log}
 	if err := conn.Export(methods{s}, rpc.Path, rpc.Interface); err != nil {
 		return nil, err
 	}
@@ -47,6 +49,7 @@ func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, h 
 			{Name: rpc.Interface, Methods: introspect.Methods(methods{}), Signals: []introspect.Signal{
 				{Name: "FolderChanged", Args: []introspect.Arg{{Name: "folder", Type: "x"}}},
 				{Name: "StatusChanged"},
+				{Name: "OutboxChanged"},
 			}},
 		},
 	}
@@ -73,6 +76,12 @@ func (s *service) FolderChanged(folderID int64) {
 func (s *service) StatusChanged() {
 	if err := s.conn.Emit(rpc.Path, rpc.SignalStatusChanged); err != nil {
 		s.log.Warn("emit StatusChanged", "err", err)
+	}
+}
+
+func (s *service) OutboxChanged() {
+	if err := s.conn.Emit(rpc.Path, rpc.SignalOutboxChanged); err != nil {
+		s.log.Warn("emit OutboxChanged", "err", err)
 	}
 }
 
@@ -148,6 +157,68 @@ func dbusError(err error) *dbus.Error {
 		name = rpc.ErrNameOffline
 	case errors.Is(err, imapsync.ErrNotFound):
 		name = rpc.ErrNameNotFound
+	case errors.Is(err, outbox.ErrNotFound):
+		name = rpc.ErrNameNotFound
+	case errors.Is(err, outbox.ErrTooLate):
+		name = rpc.ErrNameTooLate
+	case errors.Is(err, outbox.ErrTooLarge):
+		name = rpc.ErrNameTooLarge
 	}
 	return &dbus.Error{Name: name, Body: []any{err.Error()}}
+}
+
+// outboxAPI is what the service needs from the outbox.
+type outboxAPI interface {
+	Submit(ctx context.Context, account string, raw []byte) (int64, error)
+	Undo(ctx context.Context, id int64) error
+	Resolve(ctx context.Context, id int64, resend bool) error
+	List(ctx context.Context) ([]outbox.Item, error)
+}
+
+var errNoOutbox = errors.New("the outbox isn't available; see foonmaild's log")
+
+func (m methods) Send(account string, raw []byte) (int64, *dbus.Error) {
+	if m.s.outbox == nil {
+		return 0, dbusError(errNoOutbox)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	id, err := m.s.outbox.Submit(ctx, account, raw)
+	return id, dbusError(err)
+}
+
+func (m methods) Undo(id int64) *dbus.Error {
+	if m.s.outbox == nil {
+		return dbusError(errNoOutbox)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	return dbusError(m.s.outbox.Undo(ctx, id))
+}
+
+func (m methods) Resolve(id int64, resend bool) *dbus.Error {
+	if m.s.outbox == nil {
+		return dbusError(errNoOutbox)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	return dbusError(m.s.outbox.Resolve(ctx, id, resend))
+}
+
+func (m methods) Outbox() ([]rpc.OutboxItem, *dbus.Error) {
+	if m.s.outbox == nil {
+		return nil, dbusError(errNoOutbox)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	items, err := m.s.outbox.List(ctx)
+	if err != nil {
+		return nil, dbusError(err)
+	}
+	out := make([]rpc.OutboxItem, len(items))
+	for i, it := range items {
+		out[i] = rpc.OutboxItem{ID: it.ID, Account: it.Account, State: string(it.State),
+			Subject: it.Subject, To: it.To, Error: it.Error, Created: it.Created.Unix()}
+	}
+	return out, nil
 }

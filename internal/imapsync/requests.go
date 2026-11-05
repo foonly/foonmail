@@ -35,6 +35,7 @@ const (
 	reqSync reqKind = iota
 	reqFetch
 	reqFlags
+	reqAppend
 )
 
 // request is work for the folder connection, from the GUI by way of the
@@ -45,6 +46,8 @@ type request struct {
 	uid         uint32
 	uids        []uint32
 	add, remove []string
+	specialUse  string // reqAppend: the folder, by special-use flag
+	raw         []byte
 	reply       chan reqResult
 }
 
@@ -101,6 +104,9 @@ func (s *Syncer) request(ctx context.Context, req request) reqResult {
 // handleRequest runs a request on the folder connection. It leaves no
 // folder selected.
 func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req request, condstore bool) reqResult {
+	if req.kind == reqAppend {
+		return reqResult{err: s.appendMessage(ctx, c, req, condstore)}
+	}
 	f, err := s.db.FolderByID(ctx, req.folderID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && f.AccountID != s.accountID) {
 		return reqResult{err: fmt.Errorf("folder %d: %w", req.folderID, ErrNotFound)}
@@ -223,4 +229,64 @@ func (s *Syncer) notifyFolder(folderID int64, res syncResult) {
 	if len(res.added) > 0 || len(res.removed) > 0 || res.flagChanges > 0 {
 		s.notify(FolderChanged{Account: s.acct.Name, FolderID: folderID})
 	}
+}
+
+// AppendSent stores a sent message in the account's \Sent folder, marked read.
+func (s *Syncer) AppendSent(ctx context.Context, raw []byte) error {
+	return s.request(ctx, request{kind: reqAppend, specialUse: `\Sent`, raw: raw, add: []string{`\Seen`}}).err
+}
+
+// AppendDraft stores a message in the account's \Drafts folder.
+func (s *Syncer) AppendDraft(ctx context.Context, raw []byte) error {
+	return s.request(ctx, request{kind: reqAppend, specialUse: `\Drafts`, raw: raw, add: []string{`\Draft`, `\Seen`}}).err
+}
+
+// appendMessage APPENDs to the folder with the request's special-use flag,
+// then syncs that folder so the message shows up in the cache.
+func (s *Syncer) appendMessage(ctx context.Context, c *imapclient.Client, req request, condstore bool) error {
+	folders, err := s.db.Folders(ctx, s.accountID)
+	if err != nil {
+		return err
+	}
+	var f *cache.Folder
+	for i := range folders {
+		if folders[i].SpecialUse == req.specialUse {
+			f = &folders[i]
+			break
+		}
+	}
+	if f == nil {
+		return fmt.Errorf("no folder is flagged %s: %w", req.specialUse, ErrNotFound)
+	}
+	flags := make([]imap.Flag, len(req.add))
+	for i, fl := range req.add {
+		flags[i] = imap.Flag(fl)
+	}
+	if err := do(c, "append to "+f.Name, func() error {
+		cmd := c.Append(f.Name, int64(len(req.raw)), &imap.AppendOptions{Flags: flags})
+		if _, err := cmd.Write(req.raw); err != nil {
+			cmd.Close()
+			return err
+		}
+		if err := cmd.Close(); err != nil {
+			return err
+		}
+		_, err := cmd.Wait()
+		return err
+	}); err != nil {
+		return err
+	}
+	s.log.Info("appended", "folder", f.Name, "bytes", len(req.raw))
+
+	sel, err := selectFolder(c, f.Name, true, condstore)
+	if err != nil {
+		return err
+	}
+	defer do(c, "unselect", func() error { return c.Unselect().Wait() })
+	res, err := s.syncSelected(ctx, c, *f, sel, condstore)
+	if err != nil {
+		return err
+	}
+	s.notifyFolder(f.ID, res)
+	return nil
 }

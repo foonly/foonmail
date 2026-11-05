@@ -25,6 +25,7 @@ import (
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
 	"foonmail/internal/notify"
+	"foonmail/internal/outbox"
 	"foonmail/internal/tray"
 )
 
@@ -85,6 +86,7 @@ func run(configPath string, log *slog.Logger) error {
 		return err
 	}
 	var syncers []*imapsync.Syncer
+	copies := copier{}
 	backends := map[int64]backend{}
 	for i := range cfg.Accounts {
 		acct := &cfg.Accounts[i]
@@ -100,6 +102,26 @@ func run(configPath string, log *slog.Logger) error {
 		}
 		syncers = append(syncers, s)
 		backends[s.AccountID()] = s
+		copies[acct.Name] = s
+	}
+
+	// The outbox lives in the data directory: unsent mail can't be rebuilt
+	// from the server. Without it the daemon still syncs.
+	sender := &outbox.SMTP{Password: password}
+	ob, err := outbox.Open(outbox.Options{
+		DataDir:  cfg.DataDir,
+		Accounts: cfg.Accounts,
+		Sender:   sender,
+		Copier:   copies,
+		Notify:   h.notifyOutbox,
+		Log:      log,
+	})
+	if err != nil {
+		log.Error("the outbox can't be opened: sending is off", "err", err)
+	} else {
+		defer ob.Close()
+		sender.OnSizeLimit = ob.RememberSizeLimit
+		h.outbox = ob
 	}
 
 	// The session bus carries the tray, notifications and the GUI's
@@ -110,7 +132,11 @@ func run(configPath string, log *slog.Logger) error {
 		defer conn.Close()
 		closeDesktop := connectDesktop(h, conn, log)
 		defer closeDesktop()
-		svc, err := exportService(conn, db, backends, h, log)
+		var api outboxAPI // a nil *Outbox would be a non-nil interface
+		if ob != nil {
+			api = ob
+		}
+		svc, err := exportService(conn, db, backends, api, h, log)
 		if err != nil {
 			return err
 		}
@@ -119,6 +145,13 @@ func run(configPath string, log *slog.Logger) error {
 	go h.run(ctx)
 
 	var wg sync.WaitGroup
+	if ob != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ob.Run(ctx)
+		}()
+	}
 	for _, s := range syncers {
 		wg.Add(1)
 		go func() {

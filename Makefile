@@ -8,7 +8,7 @@ GO   ?= go
 GOFLAGS_ALL = -tags=$(TAGS)
 
 BIN      := bin
-COMMANDS := foonmaild foonmail
+COMMANDS := foonmaild foonmail foonmailctl
 
 .PHONY: all build test race vet check run run-daemon install clean help
 

@@ -66,6 +66,7 @@ type serviceEnv struct {
 	t       *testing.T
 	client  *rpc.Client
 	backend *fakeBackend
+	outbox  *fakeOutbox
 	hub     *hub
 	inbox   int64
 	bus     *dbustest.Bus
@@ -91,13 +92,14 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 	h.delay = 10 * time.Millisecond
 	acct, _ := db.EnsureAccount(ctx, "uplink")
 	b := &fakeBackend{}
-	svc, err := exportService(bus.Conn(), db, map[int64]backend{acct: b}, h, log)
+	fo := &fakeOutbox{}
+	svc, err := exportService(bus.Conn(), db, map[int64]backend{acct: b}, fo, h, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.signals = svc
 	go h.run(ctx)
-	return &serviceEnv{t: t, client: rpc.NewClient(bus.Conn()), backend: b, hub: h,
+	return &serviceEnv{t: t, client: rpc.NewClient(bus.Conn()), backend: b, outbox: fo, hub: h,
 		inbox: h.accounts["uplink"].inbox, bus: bus}
 }
 
@@ -213,7 +215,7 @@ func TestServiceNotRunningAndSecondDaemon(t *testing.T) {
 	}
 
 	e := newServiceEnv(t)
-	if _, err := exportService(e.bus.Conn(), nil, nil, nil, slog.Default()); err == nil {
+	if _, err := exportService(e.bus.Conn(), nil, nil, nil, nil, slog.Default()); err == nil {
 		t.Error("a second service claimed the bus name")
 	}
 }

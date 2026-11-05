@@ -603,3 +603,35 @@ func TestRequestsWhileOffline(t *testing.T) {
 		t.Errorf("offline answer took %s", time.Since(start))
 	}
 }
+
+func TestAppendSentAndDraft(t *testing.T) {
+	e := newEnv(t, "Sent")
+	// The test server has no SPECIAL-USE, so flag Sent in the cache by hand,
+	// after the one folder refresh a long poll interval allows.
+	e.syncer.acct.Folders.PollInterval = time.Hour
+	e.start()
+	defer e.stop()
+	e.eventually("Sent listed", func() bool { _, ok := e.folder("Sent"); return ok })
+	sent, _ := e.folder("Sent")
+	if err := e.db.SetFolderInfo(context.Background(), sent.ID, "/", `\Sent`); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := []byte("From: me@example.com\r\nTo: bob@example.com\r\nSubject: Sent copy\r\nMessage-ID: <copy@x>\r\n\r\nHi\r\n")
+	if err := e.syncer.AppendSent(reqCtx(t), raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.uids("Sent"); len(got) != 1 {
+		t.Fatalf("Sent in the cache after append = %v", got)
+	}
+	if f := e.serverFlags("Sent", e.uids("Sent")[0]); !slices.Contains(f, imap.FlagSeen) {
+		t.Errorf("the Sent copy isn't marked read: %v", f)
+	}
+	if !e.folderChangedFor(sent.ID) {
+		t.Error("no FolderChanged for Sent")
+	}
+
+	if err := e.syncer.AppendDraft(reqCtx(t), raw); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no Drafts folder: err = %v", err)
+	}
+}

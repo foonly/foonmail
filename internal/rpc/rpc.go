@@ -8,11 +8,16 @@
 //	SetFlags(folder x, uids au, add as, remove as)
 //	Acknowledge()                               the user is looking: clear "new"
 //	Status() → (a(sbsii))                       per account: name, online, error, unread, new
+//	Send(account s, raw ay) → (id x)           queue a message; sent after a 10-second undo window
+//	Undo(id x)                                  take it back while waiting; it goes to Drafts
+//	Resolve(id x, resend b)                     settle an uncertain or failed message
+//	Outbox() → (a(xssssx))                      unfinished and recent messages
 //
-// and two signals:
+// and three signals:
 //
 //	FolderChanged(folder x)   the cache's copy of a folder changed
 //	StatusChanged()           call Status again
+//	OutboxChanged()           call Outbox again
 //
 // Folders are cache folder ids; messages are cache message ids.
 package rpc
@@ -32,11 +37,14 @@ const (
 
 	SignalFolderChanged = Interface + ".FolderChanged"
 	SignalStatusChanged = Interface + ".StatusChanged"
+	SignalOutboxChanged = Interface + ".OutboxChanged"
 
 	// D-Bus error names, mapped to the Go errors below.
 	ErrNameOffline  = Interface + ".Error.Offline"
 	ErrNameNotFound = Interface + ".Error.NotFound"
 	ErrNameFailed   = Interface + ".Error.Failed"
+	ErrNameTooLate  = Interface + ".Error.TooLate"
+	ErrNameTooLarge = Interface + ".Error.TooLarge"
 )
 
 var (
@@ -46,6 +54,10 @@ var (
 	ErrOffline = errors.New("account is offline")
 	// ErrNotFound means the folder or message doesn't exist.
 	ErrNotFound = errors.New("not found")
+	// ErrTooLate means the message was already being sent when undo came.
+	ErrTooLate = errors.New("too late to undo: the message is already being sent")
+	// ErrTooLarge means the message is over the server's size limit.
+	ErrTooLarge = errors.New("the message is larger than the server accepts")
 )
 
 // AccountStatus is one account's state.
@@ -117,8 +129,12 @@ type FolderChanged struct{ FolderID int64 }
 // StatusChanged means Status should be called again.
 type StatusChanged struct{}
 
+// OutboxChanged means Outbox should be called again.
+type OutboxChanged struct{}
+
 func (FolderChanged) isEvent() {}
 func (StatusChanged) isEvent() {}
+func (OutboxChanged) isEvent() {}
 
 // Subscribe delivers the daemon's signals until stop is called.
 func (c *Client) Subscribe() (events <-chan Event, stop func(), err error) {
@@ -141,6 +157,8 @@ func (c *Client) Subscribe() (events <-chan Event, stop func(), err error) {
 				}
 			case SignalStatusChanged:
 				out <- StatusChanged{}
+			case SignalOutboxChanged:
+				out <- OutboxChanged{}
 			}
 		}
 	}()
@@ -177,6 +195,48 @@ func mapError(err error) error {
 		return wrap(ErrOffline)
 	case ErrNameNotFound:
 		return wrap(ErrNotFound)
+	case ErrNameTooLate:
+		return ErrTooLate
+	case ErrNameTooLarge:
+		return wrap(ErrTooLarge)
 	}
 	return err
+}
+
+// OutboxItem is one message in the outbox.
+type OutboxItem struct {
+	ID      int64
+	Account string
+	State   string // waiting, sending, sent, done, uncertain, failed, cancelled
+	Subject string
+	To      string
+	Error   string
+	Created int64 // unix seconds
+}
+
+// Send queues a complete RFC 5322 message from an account. It is sent
+// after the undo window; the result is its outbox id.
+func (c *Client) Send(ctx context.Context, account string, raw []byte) (int64, error) {
+	var id int64
+	err := c.call(ctx, "Send", account, raw).Store(&id)
+	return id, mapError(err)
+}
+
+// Undo takes a message back while it is still in the undo window and
+// moves it to Drafts.
+func (c *Client) Undo(ctx context.Context, id int64) error {
+	return mapError(c.call(ctx, "Undo", id).Err)
+}
+
+// Resolve settles an uncertain or failed message: send it again, or
+// accept that it was sent.
+func (c *Client) Resolve(ctx context.Context, id int64, resend bool) error {
+	return mapError(c.call(ctx, "Resolve", id, resend).Err)
+}
+
+// Outbox lists unfinished messages and recently finished ones.
+func (c *Client) Outbox(ctx context.Context) ([]OutboxItem, error) {
+	var items []OutboxItem
+	err := c.call(ctx, "Outbox").Store(&items)
+	return items, mapError(err)
 }
