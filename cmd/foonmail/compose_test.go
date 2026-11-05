@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gioui.org/io/key"
 
+	"foonmail/internal/cache"
+	"foonmail/internal/compose"
 	"foonmail/internal/render"
 )
 
@@ -150,4 +156,88 @@ func TestExternalEditor(t *testing.T) {
 	if h.u.comp.to.Text() != "pekka@example.com" {
 		t.Errorf("To = %q", h.u.comp.to.Text())
 	}
+}
+
+// addDraft stores a draft in a new Drafts folder and switches to it.
+func (h *harness) addDraft() cache.Folder {
+	h.t.Helper()
+	ctx := context.Background()
+	drafts, _ := h.db.EnsureFolder(ctx, h.u.accountID, "Drafts")
+	h.db.SetFolderInfo(ctx, drafts.ID, ".", `\Drafts`)
+	h.db.SaveSyncState(ctx, drafts.ID, 1, 0, 10)
+	d := compose.Reply(h.u.account, &render.Message{
+		Subject: "Kahvi?", From: []render.Address{{Name: "Bob", Addr: "bob@example.com"}}, MessageID: "a@test", Text: "Kahvi?",
+	}, compose.ReplySender)
+	d.Body = "Half a reply\n" + d.Body
+	raw, err := compose.BuildDraft(d)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.db.AddMessages(ctx, drafts.ID, []cache.NewMessage{{UID: 5, Flags: []string{`\Draft`, `\Seen`},
+		Size: int64(len(raw)), Envelope: cache.Envelope{MessageID: "draft1", Subject: "Re: Kahvi?",
+			From: cache.Address{Addr: "niklas@uplink.fi"}, Date: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)}}}); err != nil {
+		h.t.Fatal(err)
+	}
+	id, _ := h.db.Location(ctx, drafts.ID, 5)
+	if err := h.db.SetRaw(ctx, id, raw, ""); err != nil {
+		h.t.Fatal(err)
+	}
+	drafts, _ = h.db.FolderByID(ctx, drafts.ID)
+	h.u.switchFolder(drafts)
+	h.frame()
+	h.frame()
+	return drafts
+}
+
+func TestContinueAndSendDraft(t *testing.T) {
+	h := newHarness(t)
+	drafts := h.addDraft()
+	h.press(key.NameReturn)
+	h.eventually("draft opened in compose", func() bool { return h.u.mode == modeCompose })
+	c := h.u.comp
+	if c.to.Text() != "Bob <bob@example.com>" || c.subject.Text() != "Re: Kahvi?" || !strings.HasPrefix(c.body.Text(), "Half a reply") {
+		t.Errorf("draft fields: to %q, subject %q, body %q", c.to.Text(), c.subject.Text(), c.body.Text())
+	}
+	h.press(key.NameReturn, key.ModCtrl)
+	h.eventually("sent", func() bool { return len(h.daemon.sentMessages()) == 1 })
+	if m := h.lastSent(); m.InReplyTo != "a@test" {
+		t.Errorf("the continued draft lost its threading: In-Reply-To %q", m.InReplyTo)
+	}
+	h.eventually("draft deleted", func() bool {
+		_, deleted := h.daemon.draftCalls()
+		return slices.Equal(deleted, []string{fmt.Sprintf("%d:[5]", drafts.ID)})
+	})
+}
+
+func TestSaveDraft(t *testing.T) {
+	h := newHarness(t)
+	h.press("M")
+	h.u.comp.subject.SetText("Ideas")
+	h.u.comp.body.SetText("Not ready yet")
+	h.press("S", key.ModCtrl)
+	h.eventually("saved and closed", func() bool { return h.u.mode == modeList && h.u.notice == "Saved to Drafts" })
+	saved, deleted := h.daemon.draftCalls()
+	if len(saved) != 1 || len(deleted) != 0 {
+		t.Fatalf("saved %d, deleted %v", len(saved), deleted)
+	}
+	got, err := compose.FromMessage(saved[0])
+	if err != nil || got.Subject != "Ideas" || got.Body != "Not ready yet" || got.To != "" {
+		t.Errorf("saved draft = %+v, %v", got, err)
+	}
+	if len(h.daemon.sentMessages()) != 0 {
+		t.Error("saving a draft sent it")
+	}
+}
+
+func TestSavingAContinuedDraftReplacesIt(t *testing.T) {
+	h := newHarness(t)
+	drafts := h.addDraft()
+	h.press(key.NameReturn)
+	h.eventually("compose", func() bool { return h.u.mode == modeCompose })
+	h.u.comp.body.SetText("Changed my mind")
+	h.press("S", key.ModCtrl)
+	h.eventually("replaced", func() bool {
+		saved, deleted := h.daemon.draftCalls()
+		return len(saved) == 1 && slices.Equal(deleted, []string{fmt.Sprintf("%d:[5]", drafts.ID)})
+	})
 }

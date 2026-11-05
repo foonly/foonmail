@@ -206,3 +206,58 @@ func TestEditorFileRoundTrip(t *testing.T) {
 		t.Errorf("body Attach: line treated as a header: %v %+v", problems, got.Attachments)
 	}
 }
+
+func TestDraftRoundTrip(t *testing.T) {
+	d := Reply(acct(), original(), ReplyAll)
+	d.Bcc = "secret@example.com"
+	d.Body = "Half written\n\n" + d.Body
+	d.Attachments = []Attachment{{Name: "plan.txt", Data: []byte("step 1")}}
+	raw, err := BuildDraft(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := FromMessage(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.From != d.From || got.To != d.To || got.Cc != d.Cc || got.Bcc != "secret@example.com" || got.Subject != d.Subject {
+		t.Errorf("addresses or subject changed:\n got %+v\nwant %+v", got, d)
+	}
+	if got.InReplyTo != "c@x" || !slices.Equal(got.References, d.References) {
+		t.Errorf("threading lost: %q %v", got.InReplyTo, got.References)
+	}
+	if !strings.HasPrefix(got.Body, "Half written") || !strings.Contains(got.Body, "> Torstaina?") {
+		t.Errorf("body = %q", got.Body)
+	}
+	if len(got.Attachments) != 1 || string(got.Attachments[0].Data) != "step 1" {
+		t.Errorf("attachments = %+v", got.Attachments)
+	}
+}
+
+func TestDraftWithoutRecipientsOrWithTypos(t *testing.T) {
+	d := New(acct())
+	d.Subject = "Ideas"
+	d.Body = "Nothing yet"
+	if _, err := Build(d); err == nil {
+		t.Fatal("Build should still insist on recipients")
+	}
+	raw, err := BuildDraft(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := FromMessage(raw)
+	if got.To != "" || got.Subject != "Ideas" {
+		t.Errorf("empty draft came back as To %q, Subject %q", got.To, got.Subject)
+	}
+
+	d.To = "bob@example.com, liisa@exam" // still being typed
+	d.Cc = "Pekka <pekka@"
+	raw, err = BuildDraft(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ = FromMessage(raw)
+	if got.To != "bob@example.com, liisa@exam" || got.Cc != "Pekka <pekka@" {
+		t.Errorf("half-typed fields: To %q, Cc %q", got.To, got.Cc)
+	}
+}

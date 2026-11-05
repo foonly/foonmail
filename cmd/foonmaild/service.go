@@ -24,6 +24,8 @@ type backend interface {
 	SyncFolder(ctx context.Context, folderID int64) error
 	FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error)
 	SetFlags(ctx context.Context, folderID int64, uids []uint32, add, remove []string) error
+	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
+	AppendDraft(ctx context.Context, raw []byte) error
 }
 
 // service exports rpc.Interface on the session bus.
@@ -221,4 +223,28 @@ func (m methods) Outbox() ([]rpc.OutboxItem, *dbus.Error) {
 			Subject: it.Subject, To: it.To, Error: it.Error, Created: it.Created.Unix()}
 	}
 	return out, nil
+}
+
+func (m methods) DeleteMessages(folderID int64, uids []uint32) *dbus.Error {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	b, err := m.s.backendFor(ctx, folderID)
+	if err != nil {
+		return dbusError(err)
+	}
+	return dbusError(b.DeleteMessages(ctx, folderID, uids))
+}
+
+func (m methods) SaveDraft(account string, raw []byte) *dbus.Error {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	id, err := m.s.db.AccountID(ctx, account)
+	if err != nil {
+		return dbusError(fmt.Errorf("account %s: %w", account, imapsync.ErrNotFound))
+	}
+	b := m.s.backends[id]
+	if b == nil {
+		return dbusError(fmt.Errorf("account %s isn't configured: %w", account, imapsync.ErrNotFound))
+	}
+	return dbusError(b.AppendDraft(ctx, raw))
 }

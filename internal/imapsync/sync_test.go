@@ -635,3 +635,30 @@ func TestAppendSentAndDraft(t *testing.T) {
 		t.Errorf("no Drafts folder: err = %v", err)
 	}
 }
+
+func TestDeleteMessages(t *testing.T) {
+	e := newEnv(t, "Drafts")
+	e.appendTo("Drafts", "draft one")
+	e.appendTo("Drafts", "draft two")
+	e.start()
+	defer e.stop()
+	e.eventually("Drafts listed", func() bool { _, ok := e.folder("Drafts"); return ok })
+	drafts, _ := e.folder("Drafts")
+	if err := e.syncer.SyncFolder(reqCtx(t), drafts.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.syncer.DeleteMessages(reqCtx(t), drafts.ID, []uint32{1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.uids("Drafts"); !slices.Equal(got, []uint32{2}) {
+		t.Errorf("cache after delete = %v", got)
+	}
+	e.phoneSelect("Drafts")
+	msgs, err := e.phone.Fetch(imap.SeqSetNum(1, 2), &imap.FetchOptions{UID: true}).Collect()
+	if err != nil || len(msgs) != 1 || msgs[0].UID != 2 {
+		t.Errorf("server after delete: %+v, %v", msgs, err)
+	}
+	if !e.folderChangedFor(drafts.ID) {
+		t.Error("no FolderChanged after delete")
+	}
+}

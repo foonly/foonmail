@@ -55,6 +55,14 @@ func (b *fakeBackend) FetchBody(_ context.Context, folderID int64, uid uint32) (
 	return 1000 + int64(uid), nil
 }
 
+func (b *fakeBackend) DeleteMessages(_ context.Context, folderID int64, uids []uint32) error {
+	return b.record("delete")
+}
+
+func (b *fakeBackend) AppendDraft(_ context.Context, raw []byte) error {
+	return b.record("draft")
+}
+
 func (b *fakeBackend) SetFlags(_ context.Context, folderID int64, uids []uint32, add, remove []string) error {
 	if !slices.Equal(uids, []uint32{3, 4}) || !slices.Equal(add, []string{`\Seen`}) || len(remove) != 0 {
 		return errors.New("unexpected SetFlags arguments")
@@ -217,5 +225,22 @@ func TestServiceNotRunningAndSecondDaemon(t *testing.T) {
 	e := newServiceEnv(t)
 	if _, err := exportService(e.bus.Conn(), nil, nil, nil, nil, slog.Default()); err == nil {
 		t.Error("a second service claimed the bus name")
+	}
+}
+
+func TestServiceDrafts(t *testing.T) {
+	e := newServiceEnv(t)
+	ctx := callCtx(t)
+	if err := e.client.SaveDraft(ctx, "uplink", []byte("To: bob@example.com\r\n\r\nx")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.client.DeleteMessages(ctx, e.inbox, []uint32{4}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.backend.recorded(); !slices.Equal(got, []string{"draft", "delete"}) {
+		t.Errorf("backend calls = %v", got)
+	}
+	if err := e.client.SaveDraft(ctx, "nobody", []byte("x")); !errors.Is(err, rpc.ErrNotFound) {
+		t.Errorf("unknown account: err = %v", err)
 	}
 }

@@ -36,6 +36,7 @@ const (
 	reqFetch
 	reqFlags
 	reqAppend
+	reqDelete
 )
 
 // request is work for the folder connection, from the GUI by way of the
@@ -114,7 +115,7 @@ func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req re
 	if err != nil {
 		return reqResult{err: err}
 	}
-	readOnly := req.kind != reqFlags
+	readOnly := req.kind != reqFlags && req.kind != reqDelete
 	sel, err := selectFolder(c, f.Name, readOnly, condstore)
 	if err != nil {
 		return reqResult{err: err}
@@ -135,6 +136,13 @@ func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req re
 	case reqFetch:
 		id, err := s.fetchBody(ctx, c, f, sel, req.uid, condstore)
 		return reqResult{messageID: id, err: err}
+
+	case reqDelete:
+		err := s.deleteMessages(ctx, c, f, req.uids)
+		if err == nil {
+			s.notify(FolderChanged{Account: s.acct.Name, FolderID: f.ID})
+		}
+		return reqResult{err: err}
 
 	case reqFlags:
 		err := s.storeFlags(ctx, c, f, req)
@@ -289,4 +297,34 @@ func (s *Syncer) appendMessage(ctx context.Context, c *imapclient.Client, req re
 	}
 	s.notifyFolder(f.ID, res)
 	return nil
+}
+
+// DeleteMessages removes messages from a folder for good, such as a draft
+// that was sent or saved again.
+func (s *Syncer) DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	return s.request(ctx, request{kind: reqDelete, folderID: folderID, uids: uids}).err
+}
+
+// deleteMessages marks messages \Deleted and expunges exactly those with UID
+// EXPUNGE. Without UIDPLUS a plain EXPUNGE would also remove anything else
+// marked \Deleted in the folder, so then they are only marked.
+func (s *Syncer) deleteMessages(ctx context.Context, c *imapclient.Client, f cache.Folder, uids []uint32) error {
+	set := imap.UIDSetNum(toUIDs(uids)...)
+	if err := do(c, "mark deleted", func() error {
+		return c.Store(set, &imap.StoreFlags{Op: imap.StoreFlagsAdd, Flags: []imap.Flag{imap.FlagDeleted}, Silent: true}, nil).Close()
+	}); err != nil {
+		return err
+	}
+	caps := c.Caps()
+	if !caps.Has(imap.CapUIDPlus) && !caps.Has(imap.CapIMAP4rev2) {
+		s.log.Warn("no UIDPLUS: messages marked deleted but not expunged", "folder", f.Name, "uids", uids)
+		return nil // the next sync records the flag
+	}
+	if err := do(c, "expunge", func() error { return c.UIDExpunge(set).Close() }); err != nil {
+		return err
+	}
+	return s.db.RemoveUIDs(ctx, f.ID, uids)
 }

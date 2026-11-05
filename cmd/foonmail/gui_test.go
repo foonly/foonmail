@@ -38,6 +38,8 @@ type fakeDaemon struct {
 	flagged  []string
 	synced   []int64
 	sent     [][]byte
+	drafts   [][]byte
+	deleted  []string
 	err      error // returned by every call
 	flagsErr error
 }
@@ -84,6 +86,29 @@ func (d *fakeDaemon) Send(_ context.Context, account string, raw []byte) (int64,
 	}
 	d.sent = append(d.sent, raw)
 	return int64(len(d.sent)), nil
+}
+
+func (d *fakeDaemon) SaveDraft(_ context.Context, account string, raw []byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.err != nil {
+		return d.err
+	}
+	d.drafts = append(d.drafts, raw)
+	return nil
+}
+
+func (d *fakeDaemon) DeleteMessages(_ context.Context, folderID int64, uids []uint32) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleted = append(d.deleted, fmt.Sprintf("%d:%v", folderID, uids))
+	return d.err
+}
+
+func (d *fakeDaemon) draftCalls() ([][]byte, []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.drafts), slices.Clone(d.deleted)
 }
 
 func (d *fakeDaemon) sentMessages() [][]byte {

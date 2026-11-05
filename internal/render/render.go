@@ -78,8 +78,10 @@ type Message struct {
 	Subject      string
 	From, To, Cc []Address
 	ReplyTo      []Address
-	MessageID    string   // without <>
-	References   []string // without <>, oldest first
+	Bcc          []Address // only in your own copies: drafts and Sent
+	InReplyTo    string    // without <>
+	MessageID    string    // without <>
+	References   []string  // without <>, oldest first
 	Date         time.Time
 
 	Text   string // what to show; lines starting with ">" are quoted
@@ -178,6 +180,10 @@ func (m *Message) readHeader(h *mail.Header) {
 	m.To = addresses(h, "To")
 	m.Cc = addresses(h, "Cc")
 	m.ReplyTo = addresses(h, "Reply-To")
+	m.Bcc = addresses(h, "Bcc")
+	if ids := msgIDPattern.FindAllStringSubmatch(headerText(h, "In-Reply-To"), 1); len(ids) > 0 {
+		m.InReplyTo = ids[0][1]
+	}
 	m.MessageID, m.References = messageIDs(h)
 }
 
@@ -368,4 +374,9 @@ func messageIDs(h *mail.Header) (id string, refs []string) {
 		}
 	}
 	return id, refs
+}
+
+func headerText(h *mail.Header, key string) string {
+	s, _ := h.Text(key)
+	return s
 }

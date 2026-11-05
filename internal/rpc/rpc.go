@@ -12,6 +12,8 @@
 //	Undo(id x)                                  take it back while waiting; it goes to Drafts
 //	Resolve(id x, resend b)                     settle an uncertain or failed message
 //	Outbox() → (a(xssssx))                      unfinished and recent messages
+//	SaveDraft(account s, raw ay)                store a draft in the Drafts folder
+//	DeleteMessages(folder x, uids au)           remove messages for good (UID EXPUNGE)
 //
 // and three signals:
 //
@@ -239,4 +241,14 @@ func (c *Client) Outbox(ctx context.Context) ([]OutboxItem, error) {
 	var items []OutboxItem
 	err := c.call(ctx, "Outbox").Store(&items)
 	return items, mapError(err)
+}
+
+// SaveDraft stores a message in the account's Drafts folder.
+func (c *Client) SaveDraft(ctx context.Context, account string, raw []byte) error {
+	return mapError(c.call(ctx, "SaveDraft", account, raw).Err)
+}
+
+// DeleteMessages removes messages from a folder for good.
+func (c *Client) DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error {
+	return mapError(c.call(ctx, "DeleteMessages", folderID, uids).Err)
 }

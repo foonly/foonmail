@@ -23,8 +23,8 @@ import (
 	"foonmail/internal/rpc"
 )
 
-const composeHints = "Ctrl+Enter send · Ctrl+E external editor · Ctrl+O attach · Ctrl+R remove last attachment · " +
-	"Tab next field · Esc twice discards"
+const composeHints = "Ctrl+Enter send · Ctrl+S save to Drafts · Ctrl+E external editor · Ctrl+O attach · " +
+	"Ctrl+R remove last attachment · Tab next field · Esc twice discards"
 
 // composer is the message being written.
 type composer struct {
@@ -36,6 +36,7 @@ type composer struct {
 	body        widget.Editor
 	attachments []compose.Attachment
 	answering   *cache.Entry // the message replied to, to mark it \Answered
+	draftOf     *cache.Entry // the stored draft being continued, deleted once sent
 	returnTo    mode
 	busy        bool // sending, picking files or in the external editor
 	discarding  bool // Esc was pressed once with something written
@@ -212,6 +213,9 @@ func (u *ui) sendComposed() {
 				if c.answering != nil {
 					u.markAnswered(*c.answering)
 				}
+				if c.draftOf != nil {
+					u.deleteDraft(*c.draftOf)
+				}
 				if u.comp == c {
 					u.leaveCompose()
 				}
@@ -348,6 +352,7 @@ func (u *ui) updateCompose(gtx layout.Context) {
 			key.Filter{Name: key.NameReturn, Required: key.ModCtrl},
 			key.Filter{Name: key.NameEnter, Required: key.ModCtrl},
 			key.Filter{Name: "E", Required: key.ModCtrl},
+			key.Filter{Name: "S", Required: key.ModCtrl},
 			key.Filter{Name: "O", Required: key.ModCtrl},
 			key.Filter{Name: "R", Required: key.ModCtrl},
 			key.Filter{Name: key.NameEscape},
@@ -368,6 +373,8 @@ func (u *ui) updateCompose(gtx layout.Context) {
 		switch ke.Name {
 		case key.NameReturn, key.NameEnter:
 			u.sendComposed()
+		case "S":
+			u.saveDraft()
 		case "E":
 			u.editExternally()
 		case "O":
@@ -384,7 +391,7 @@ func (u *ui) updateCompose(gtx layout.Context) {
 				return
 			}
 			c.discarding = true
-			u.notice = "Esc again discards this message."
+			u.notice = "Esc again discards this message · Ctrl+S saves it to Drafts"
 		}
 	}
 }
@@ -467,4 +474,97 @@ func (u *ui) attachmentRow(gtx layout.Context) layout.Dimensions {
 		l.Color, l.MaxLines = col, 2
 		return l.Layout(gtx)
 	})
+}
+
+// saveDraft stores the message in Drafts and closes it, like mutt's
+// postpone. A draft being continued is replaced: the new copy is saved
+// first, then the old one deleted, so a failure never loses it.
+func (u *ui) saveDraft() {
+	c := u.comp
+	if u.daemon == nil {
+		u.notice = "foonmaild isn't running: can't save to Drafts"
+		return
+	}
+	raw, err := compose.BuildDraft(c.draft())
+	if err != nil {
+		u.notice = "Can't save: " + err.Error()
+		return
+	}
+	c.busy = true
+	u.notice = "Saving to Drafts…"
+	account, old := u.account.Name, c.draftOf
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := u.daemon.SaveDraft(ctx, account, raw)
+		u.post(func() {
+			c.busy = false
+			switch {
+			case errors.Is(err, rpc.ErrNotFound):
+				u.notice = "Couldn't save: this account has no Drafts folder"
+			case err != nil:
+				u.notice = "Couldn't save to Drafts: " + err.Error()
+			default:
+				if old != nil {
+					u.deleteDraft(*old)
+				}
+				if u.comp == c {
+					u.leaveCompose()
+				}
+				u.notice = "Saved to Drafts"
+			}
+		})
+	}()
+}
+
+// continueDraft opens a stored draft in compose.
+func (u *ui) continueDraft(e cache.Entry) {
+	u.notice = "Opening the draft…"
+	go func() {
+		raw, err := u.loadRaw(e.Summary)
+		var d *compose.Draft
+		if err == nil {
+			d, err = compose.FromMessage(raw)
+		}
+		u.post(func() {
+			if err != nil {
+				u.notice = "Couldn't open the draft: " + err.Error()
+				return
+			}
+			u.notice = ""
+			if d.From == "" {
+				d.From = compose.New(u.account).From
+			}
+			u.startCompose(d, nil)
+			u.comp.draftOf = &e
+		})
+	}()
+}
+
+// deleteDraft removes a stored draft that was sent or saved again.
+func (u *ui) deleteDraft(e cache.Entry) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := u.daemon.DeleteMessages(ctx, e.FolderID, []uint32{e.UID}); err != nil {
+			u.post(func() { u.notice = "The old draft is still in Drafts: " + err.Error() })
+		}
+	}()
+}
+
+// inDrafts reports whether the current folder is the Drafts folder.
+func (u *ui) inDrafts() bool { return u.folder.SpecialUse == `\Drafts` }
+
+// openSelected opens the selected conversation, or in Drafts continues
+// the draft.
+func (u *ui) openSelected() {
+	c := u.current()
+	if c == nil {
+		return
+	}
+	if u.inDrafts() {
+		u.continueDraft(c.members[len(c.members)-1])
+		return
+	}
+	u.open()
 }

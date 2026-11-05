@@ -161,7 +161,7 @@ func (u *ui) updateList(gtx layout.Context) {
 		case key.NameEnd, "*":
 			u.moveTo(len(u.view) - 1)
 		case key.NameReturn, key.NameEnter:
-			u.open()
+			u.openSelected()
 		case "N":
 			u.toggleRead()
 		case "C":
@@ -201,7 +201,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			}
 		case gesture.KindClick:
 			if ev.NumClicks >= 2 && u.rowAt(ev.Position.Y) == u.sel {
-				u.open()
+				u.openSelected()
 			}
 		}
 	}

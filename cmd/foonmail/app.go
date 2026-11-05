@@ -35,6 +35,8 @@ type daemon interface {
 	Acknowledge(ctx context.Context) error
 	Status(ctx context.Context) ([]rpc.AccountStatus, error)
 	Send(ctx context.Context, account string, raw []byte) (int64, error)
+	SaveDraft(ctx context.Context, account string, raw []byte) error
+	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
 }
 
 type mode int

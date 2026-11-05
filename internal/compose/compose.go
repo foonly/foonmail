@@ -67,7 +67,9 @@ func (d *Draft) Empty() bool {
 // multipart/mixed with the attachments when there are any. Bcc is kept;
 // the daemon leaves it out of what goes over the wire. Date and Message-ID
 // are left to the daemon.
-func Build(d *Draft) ([]byte, error) {
+func Build(d *Draft) ([]byte, error) { return build(d, true) }
+
+func build(d *Draft, strict bool) ([]byte, error) {
 	from, err := mail.ParseAddress(d.From)
 	if err != nil {
 		return nil, fmt.Errorf("From: %w", err)
@@ -80,6 +82,10 @@ func Build(d *Draft) ([]byte, error) {
 		if strings.TrimSpace(f.value) == "" {
 			continue
 		}
+		if f.value == "undisclosed-recipients:;" && !strict {
+			header(f.key, f.value)
+			continue
+		}
 		list, err := mail.ParseAddressList(f.value)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.key, err)
@@ -87,7 +93,7 @@ func Build(d *Draft) ([]byte, error) {
 		nrcpt += len(list)
 		header(f.key, joinAddresses(list))
 	}
-	if nrcpt == 0 {
+	if nrcpt == 0 && strict {
 		return nil, errors.New("there are no recipients")
 	}
 	header("Subject", mime.QEncoding.Encode("utf-8", d.Subject))
@@ -207,3 +213,47 @@ func writeBase64(w io.Writer, data []byte) {
 func formatDate(t time.Time) string {
 	return t.Local().Format("Mon, 2 Jan 2006 at 15:04")
 }
+
+// BuildDraft renders a draft for the Drafts folder. Unlike Build it accepts
+// a draft without recipients, and keeps address fields that don't parse
+// yet as typed, so nothing written is lost.
+func BuildDraft(d *Draft) ([]byte, error) {
+	lax := *d
+	var keep []string
+	for _, f := range []struct {
+		key   string
+		value *string
+	}{{"To", &lax.To}, {"Cc", &lax.Cc}, {"Bcc", &lax.Bcc}} {
+		v := strings.TrimSpace(*f.value)
+		if v == "" {
+			continue
+		}
+		if _, err := mail.ParseAddressList(v); err != nil {
+			keep = append(keep, f.key+": "+oneLine(v))
+			*f.value = ""
+		}
+	}
+	if _, err := mail.ParseAddress(lax.From); err != nil {
+		return nil, fmt.Errorf("From: %w", err)
+	}
+	if strings.TrimSpace(lax.To+lax.Cc+lax.Bcc) == "" {
+		// Build insists on a recipient; a draft doesn't need one.
+		lax.To = "undisclosed-recipients:;"
+	}
+	raw, err := build(&lax, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(keep) == 0 {
+		return raw, nil
+	}
+	// Unparsed fields go back in as written, in X- headers FromMessage reads.
+	var extra bytes.Buffer
+	for _, k := range keep {
+		key, value, _ := strings.Cut(k, ": ")
+		fmt.Fprintf(&extra, "X-Foonmail-Draft-%s: %s\r\n", key, mime.QEncoding.Encode("utf-8", value))
+	}
+	return append(extra.Bytes(), raw...), nil
+}
+
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

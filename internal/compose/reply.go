@@ -3,6 +3,7 @@ package compose
 import (
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"regexp"
 	"slices"
 	"strings"
@@ -208,4 +209,61 @@ func formatAddress(a render.Address) string {
 		name = "\"" + strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(name) + "\""
 	}
 	return name + " <" + a.Addr + ">"
+}
+
+// FromMessage reads a stored draft (or any message) back into an editable
+// draft: addresses, subject, text, threading headers and attachments.
+func FromMessage(raw []byte) (*Draft, error) {
+	m, err := render.Render(raw, render.Options{})
+	if err != nil {
+		return nil, err
+	}
+	d := &Draft{
+		Subject:    m.Subject,
+		Body:       m.Text,
+		InReplyTo:  m.InReplyTo,
+		References: m.References,
+	}
+	if len(m.From) > 0 {
+		d.From = formatAddress(m.From[0])
+	}
+	d.To, d.Cc, d.Bcc = addressString(m.To), addressString(m.Cc), addressString(m.Bcc)
+	if strings.Contains(d.To, "undisclosed-recipients") {
+		d.To = ""
+	}
+	// Fields saved before they parsed come back as they were typed.
+	for key, field := range map[string]*string{"To": &d.To, "Cc": &d.Cc, "Bcc": &d.Bcc} {
+		if v := draftHeader(raw, "X-Foonmail-Draft-"+key); v != "" {
+			*field = v
+		}
+	}
+	for _, a := range m.Attachments {
+		if a.Inline && strings.HasPrefix(a.ContentType, "image/") {
+			continue
+		}
+		data, err := render.AttachmentData(raw, a.Index)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %s: %w", a.Filename, err)
+		}
+		d.Attachments = append(d.Attachments, Attachment{
+			Name: render.SafeFilename(a.Filename), ContentType: a.ContentType, Data: data,
+		})
+	}
+	return d, nil
+}
+
+// draftHeader reads one of BuildDraft's X- headers.
+func draftHeader(raw []byte, key string) string {
+	head, _, _ := strings.Cut(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n\n")
+	prefix := strings.ToLower(key) + ":"
+	for _, line := range strings.Split(head, "\n") {
+		if strings.HasPrefix(strings.ToLower(line), prefix) {
+			v := strings.TrimSpace(line[len(prefix):])
+			if dec, err := new(mime.WordDecoder).DecodeHeader(v); err == nil {
+				return dec
+			}
+			return v
+		}
+	}
+	return ""
 }
