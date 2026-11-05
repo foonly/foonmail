@@ -474,19 +474,18 @@ func TestDisplayHelpers(t *testing.T) {
 	}
 }
 
-func TestArrowsMoveBetweenMessages(t *testing.T) {
+func TestArrowsMoveBetweenConversations(t *testing.T) {
 	h := newHarness(t)
-	h.height = 160 // less than one message tall, so each message can be scrolled to the top
 	h.press(key.NameReturn)
 	h.eventually("loaded", h.loaded)
-	o := h.u.conv
-	h.press(key.NameLeftArrow)
-	if o.list.Position.First != 1 {
-		t.Errorf("←: at message %d, want 1", o.list.Position.First)
-	}
 	h.press(key.NameRightArrow)
-	if o.list.Position.First != 2 {
-		t.Errorf("→: at message %d, want 2", o.list.Position.First)
+	h.eventually("next conversation", func() bool { return h.u.conv.conv.key == "x" && h.loaded() })
+	h.press(key.NameLeftArrow)
+	h.eventually("previous conversation", func() bool { return h.u.conv.conv.key == "a" && h.loaded() })
+	// At the first conversation, ← stays put.
+	h.press(key.NameLeftArrow)
+	if h.u.conv.conv.key != "a" || h.u.mode != modeView {
+		t.Errorf("← at the first conversation: key %q, mode %v", h.u.conv.conv.key, h.u.mode)
 	}
 }
 
@@ -499,20 +498,7 @@ func TestTextFocusIsReleasedWithoutSelection(t *testing.T) {
 	body := &o.parts[2].body
 	src := h.r.Source()
 
-	// A click that selects nothing gives the keyboard back.
-	src.Execute(key.FocusCmd{Tag: body})
-	h.frame()
-	h.frame()
-	if src.Focused(body) {
-		t.Fatal("text kept focus with nothing selected")
-	}
-	h.press(key.NameLeftArrow)
-	if o.list.Position.First != 1 {
-		t.Errorf("← after clicking into text: at message %d, want 1", o.list.Position.First)
-	}
-
 	// A selection keeps focus, so it can be copied.
-	h.press(key.NameRightArrow)
 	src.Execute(key.FocusCmd{Tag: body})
 	body.SetCaret(0, 4)
 	h.frame()
@@ -528,4 +514,15 @@ func TestTextFocusIsReleasedWithoutSelection(t *testing.T) {
 	if !src.Focused(body) {
 		t.Error("text lost focus during a drag")
 	}
+
+	// A click that selects nothing gives the keyboard back.
+	h.u.pressing = false
+	h.frame()
+	h.frame()
+	if src.Focused(body) {
+		t.Fatal("text kept focus with nothing selected")
+	}
+	h.press(key.NameRightArrow)
+	h.eventually("→ after clicking into the text reaches the next conversation",
+		func() bool { return h.u.conv.conv.key == "x" })
 }

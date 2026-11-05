@@ -25,7 +25,7 @@ import (
 
 const (
 	listHints = "j/k move · Enter open · c folders · N read/unread · / filter · = and * first/last · q quit"
-	viewHints = "Esc, q or i back · j/k next/previous conversation · n/p or ←/→ next/previous message · Space and - page · h quoted text · number + Enter opens a link"
+	viewHints = "Esc, q or i back · j/k or →/← next/previous conversation · n/p next/previous message · Space and - page · h quoted text · number + Enter opens a link"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -418,19 +418,19 @@ func (u *ui) updateView(gtx layout.Context) {
 		case name == key.NameEscape || name == "Q" || name == "I":
 			u.mode = modeList
 			u.focusReq = u.listTag
-		case name == "J":
+		case name == "J" || name == key.NameRightArrow:
 			if u.sel < len(u.view)-1 {
 				u.moveTo(u.sel + 1)
 				u.open()
 			}
-		case name == "K":
+		case name == "K" || name == key.NameLeftArrow:
 			if u.sel > 0 {
 				u.moveTo(u.sel - 1)
 				u.open()
 			}
-		case name == "N" || name == key.NameRightArrow:
+		case name == "N":
 			o.list.Position = layout.Position{First: min(o.list.Position.First+1, len(o.parts)-1)}
-		case name == "P" || name == key.NameLeftArrow:
+		case name == "P":
 			first := o.list.Position.First
 			if o.list.Position.Offset == 0 {
 				first--
