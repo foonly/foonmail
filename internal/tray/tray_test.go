@@ -113,7 +113,7 @@ func TestRegisterPropertiesAndActivate(t *testing.T) {
 	sigs := make(chan *dbus.Signal, 10)
 	host.Signal(sigs)
 	tr.Set(State{Status: NeedsAttention, IconName: "mail-unread", Tooltip: "foonmail\n1 new"})
-	want := map[string]bool{itemIface + ".NewStatus": true, itemIface + ".NewIcon": true, itemIface + ".NewToolTip": true}
+	want := map[string]bool{itemIface + ".NewStatus": true, itemIface + ".NewIcon": true, itemIface + ".NewToolTip": true, itemIface + ".NewAttentionIcon": true}
 	deadline := time.After(2 * time.Second)
 	for len(want) > 0 {
 		select {
@@ -122,6 +122,9 @@ func TestRegisterPropertiesAndActivate(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("signals not received: %v", want)
 		}
+	}
+	if get("AttentionIconName") != "mail-unread" {
+		t.Errorf("AttentionIconName = %v: hosts show it while the status is NeedsAttention", get("AttentionIconName"))
 	}
 	if get("Status") != "NeedsAttention" || get("IconName") != "mail-unread" {
 		t.Errorf("after Set: Status %v, IconName %v", get("Status"), get("IconName"))

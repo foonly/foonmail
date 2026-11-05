@@ -82,13 +82,15 @@ func New(conn *dbus.Conn, id string, initial State, onActivate func(), log *slog
 	}
 	title, text := splitTooltip(initial.Tooltip)
 	props, err := prop.Export(conn, itemPath, prop.Map{itemIface: {
-		"Category":          {Value: "Communications", Emit: prop.EmitTrue},
-		"Id":                {Value: id, Emit: prop.EmitTrue},
-		"Title":             {Value: id, Emit: prop.EmitTrue},
-		"Status":            {Value: string(initial.Status), Emit: prop.EmitTrue},
-		"IconName":          {Value: initial.IconName, Emit: prop.EmitTrue},
-		"IconPixmap":        {Value: []pixmap{}, Emit: prop.EmitTrue},
-		"AttentionIconName": {Value: "", Emit: prop.EmitTrue},
+		"Category":   {Value: "Communications", Emit: prop.EmitTrue},
+		"Id":         {Value: id, Emit: prop.EmitTrue},
+		"Title":      {Value: id, Emit: prop.EmitTrue},
+		"Status":     {Value: string(initial.Status), Emit: prop.EmitTrue},
+		"IconName":   {Value: initial.IconName, Emit: prop.EmitTrue},
+		"IconPixmap": {Value: []pixmap{}, Emit: prop.EmitTrue},
+		// Hosts show the attention icon instead of IconName while the status is
+		// NeedsAttention; left empty, that state shows a placeholder.
+		"AttentionIconName": {Value: initial.IconName, Emit: prop.EmitTrue},
 		"ToolTip":           {Value: tooltip{Title: title, Text: text, Pixmaps: []pixmap{}}, Emit: prop.EmitTrue},
 		"ItemIsMenu":        {Value: false, Emit: prop.EmitTrue},
 	}})
@@ -152,6 +154,8 @@ func (t *Tray) Set(s State) {
 	if s.IconName != old.IconName {
 		t.props.SetMust(itemIface, "IconName", s.IconName)
 		t.emit("NewIcon")
+		t.props.SetMust(itemIface, "AttentionIconName", s.IconName)
+		t.emit("NewAttentionIcon")
 	}
 	if s.Tooltip != old.Tooltip {
 		title, text := splitTooltip(s.Tooltip)
