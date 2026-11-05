@@ -164,7 +164,7 @@ func Render(raw []byte, opts Options) (*Message, error) {
 			m.Text, m.Links = linkifyPlain(m.Text, newNumberer(opts))
 		}
 	}
-	m.Text, m.LinkSpans = extractSpans(m.Text)
+	m.Text, m.LinkSpans = extractSpans(expandTabs(m.Text))
 	m.Quotes = findQuotes(m.Text)
 	return m, nil
 }

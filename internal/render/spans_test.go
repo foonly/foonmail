@@ -137,3 +137,15 @@ func TestBracketedAddressGetsSpace(t *testing.T) {
 		t.Errorf("got %q\nwant %q", m.Text, want)
 	}
 }
+
+func TestTabsExpand(t *testing.T) {
+	m := mustRender(t, raw([]string{"Content-Type: text/plain"},
+		"\tCheers,\nab\tc\n\t"+"https://x.example/\tend"), Options{LinkPlain: true})
+	want := "        Cheers,\nab      c\n        https://x.example/ [1]  end"
+	if m.Text != want {
+		t.Errorf("got  %q\nwant %q", m.Text, want)
+	}
+	if len(m.LinkSpans) != 1 || m.Text[m.LinkSpans[0].Start:m.LinkSpans[0].End] != "https://x.example/ [1]" {
+		t.Errorf("spans %+v", m.LinkSpans)
+	}
+}

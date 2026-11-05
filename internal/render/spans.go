@@ -156,3 +156,34 @@ func trimURL(s string) (url, tail string) {
 	}
 	return s, tail
 }
+
+// tabWidth is the distance between tab stops.
+const tabWidth = 8
+
+// expandTabs replaces tabs with spaces to the next tab stop. Text widgets
+// don't lay tabs out; they show as a missing glyph. The link marks take no
+// column.
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			n := tabWidth - col%tabWidth
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+		case r == '\n':
+			b.WriteRune(r)
+			col = 0
+		case strings.ContainsRune(markStart+markEnd+markCancel, r):
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+			col++
+		}
+	}
+	return b.String()
+}
