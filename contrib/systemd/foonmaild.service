@@ -1,6 +1,6 @@
 # systemd user unit for foonmaild.
 #
-#   go install ./cmd/foonmaild
+#   make install
 #   cp contrib/systemd/foonmaild.service ~/.config/systemd/user/
 #   systemctl --user enable --now foonmaild
 #
