@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -106,5 +107,44 @@ func TestBaseSubject(t *testing.T) {
 		if got := baseSubject(in); got != want {
 			t.Errorf("baseSubject(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestFolderOrder(t *testing.T) {
+	var id int64
+	f := func(name, special string) cache.Folder {
+		id++
+		return cache.Folder{ID: id, Name: name, Delimiter: ".", SpecialUse: special, UIDValidity: 1}
+	}
+	// The layout of the real server, shuffled.
+	folders := []cache.Folder{
+		f("Queue", ""), f("Trash", `\Trash`), f("Archives.2025", ""), f("INBOX.Tickets", ""),
+		f("Junk", `\Junk`), f("Public", ""), f("Archives.2026.2026", ""), f("Drafts", `\Drafts`),
+		f("Archives", ""), f("Sent", `\Sent`), f("INBOX", ""), f("Archives.2026", ""), f("INBOX.Github", ""),
+	}
+	describe := func(rows []folderRow) string {
+		var out []string
+		for _, r := range rows {
+			out = append(out, strings.Repeat("  ", r.depth)+r.label)
+		}
+		return strings.Join(out, "|")
+	}
+	want := "INBOX|  Github|  Tickets|Drafts|Sent|Archives 2026|  2026|Junk|Trash|Archives|  2025|Public|Queue"
+	if got := describe(folderRows(folders, nil, 2026)); got != want {
+		t.Errorf("order:\n got %s\nwant %s", got, want)
+	}
+	// Next year has no folder yet: the Archives folder itself is the archive.
+	want = "INBOX|  Github|  Tickets|Drafts|Sent|Archives|  2025|  2026|    2026|Junk|Trash|Public|Queue"
+	if got := describe(folderRows(folders, nil, 2027)); got != want {
+		t.Errorf("without a folder for the year:\n got %s\nwant %s", got, want)
+	}
+	// A flagged \Archive wins over the name, and special folders inside
+	// INBOX move out with their subfolders.
+	folders = []cache.Folder{
+		f("INBOX", ""), f("INBOX.Sent", `\Sent`), f("INBOX.Sent.Old", ""), f("Old mail", `\Archive`), f("Archives", ""),
+	}
+	want = "INBOX|Sent|  Old|Old mail|Archives"
+	if got := describe(folderRows(folders, nil, 2026)); got != want {
+		t.Errorf("flagged archive and INBOX.Sent:\n got %s\nwant %s", got, want)
 	}
 }

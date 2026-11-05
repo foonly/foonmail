@@ -432,7 +432,7 @@ func TestFolderPane(t *testing.T) {
 	for _, r := range h.u.pane.rows {
 		labels = append(labels, r.label)
 	}
-	if !slices.Equal(labels, []string{"INBOX", "Archive", "Sent"}) {
+	if !slices.Equal(labels, []string{"INBOX", "Sent", "Archive"}) {
 		t.Errorf("folders = %v", labels)
 	}
 	if h.u.pane.rows[h.u.pane.sel].folder.ID != h.inbox.ID {
@@ -440,10 +440,13 @@ func TestFolderPane(t *testing.T) {
 	}
 
 	// Moving previews the folder from the cache, without syncing it.
-	h.press("J") // Archive
 	h.press("J") // Sent
 	if h.u.folder.ID != h.sent.ID || len(h.u.convs) != 1 {
 		t.Errorf("preview: folder %q with %d conversations", h.u.folder.Name, len(h.u.convs))
+	}
+	h.press("J") // Archive
+	if h.u.folder.ID != h.archive.ID {
+		t.Errorf("preview: folder %q, want Archive", h.u.folder.Name)
 	}
 	if got := h.daemon.calls().synced; len(got) != 0 {
 		t.Errorf("previewing synced folders: %v", got)
@@ -464,6 +467,7 @@ func TestFolderPane(t *testing.T) {
 	if !h.u.pane.open {
 		t.Fatal("← did not open the pane")
 	}
+	h.press("J") // Sent
 	h.press("J") // Archive
 	h.press(key.NameRightArrow)
 	if h.u.pane.open || h.u.folder.ID != h.archive.ID {
@@ -478,7 +482,8 @@ func TestFolderPane(t *testing.T) {
 
 	// Choosing INBOX doesn't sync it: IDLE keeps it current.
 	h.press("C")
-	h.press("K")
+	h.press("K") // Sent
+	h.press("K") // INBOX
 	h.press(key.NameReturn)
 	if h.u.folder.ID != h.inbox.ID || len(h.daemon.calls().synced) != 1 {
 		t.Errorf("back to INBOX: folder %q, synced %v", h.u.folder.Name, h.daemon.calls().synced)
@@ -645,10 +650,10 @@ func TestFolderPaneMouse(t *testing.T) {
 		return h.u.paneShown(layout.Context{Ops: new(op.Ops), Source: h.r.Source()}) == 1
 	})
 	row := float32(h.u.rowH)
-	y := float32(h.u.listTop) + 1.5*row // the second row: Archive
+	y := float32(h.u.listTop) + 2.5*row // the third row: Archive
 
 	h.click(40, y, 1)
-	if h.u.pane.sel != 1 || h.u.folder.ID != h.archive.ID {
+	if h.u.pane.sel != 2 || h.u.folder.ID != h.archive.ID {
 		t.Fatalf("a click didn't preview Archive: sel %d, folder %q", h.u.pane.sel, h.u.folder.Name)
 	}
 	if !h.u.pane.open || len(h.daemon.calls().synced) != 0 {
@@ -666,7 +671,7 @@ func TestFolderPaneMouse(t *testing.T) {
 	h.eventually("pane closed", func() bool {
 		return h.u.paneShown(layout.Context{Ops: new(op.Ops), Source: h.r.Source()}) == 0
 	})
-	h.click(300, y, 1)
+	h.click(300, float32(h.u.listTop)+1.5*row, 1) // the second conversation
 	if h.selectedKey() != "x" {
 		t.Errorf("clicking the second row of the list selected %q", h.selectedKey())
 	}

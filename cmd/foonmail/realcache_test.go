@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,13 @@ func TestRealCacheGrouping(t *testing.T) {
 			sent = f.ID
 		}
 	}
+	counts, _ := db.FolderCounts(ctx, acct)
+	var order []string
+	for _, r := range folderRows(folders, counts, time.Now().Year()) {
+		order = append(order, strings.Repeat("  ", r.depth)+r.label)
+	}
+	t.Logf("folder order:\n%s", strings.Join(order, "\n"))
+
 	start := time.Now()
 	entries, _ := db.Entries(ctx, inbox)
 	more, _ := db.Entries(ctx, sent)

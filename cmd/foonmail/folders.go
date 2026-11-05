@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,30 +56,118 @@ var specialLabels = map[string]string{
 	`\Archive`: "archive", `\All`: "all mail", `\Flagged`: "flagged",
 }
 
-// folderRows orders folders: INBOX and its subfolders first, then the rest
-// by name, each under its parent.
-func folderRows(folders []cache.Folder, counts map[int64]cache.Counts) []folderRow {
+// specialOrder is the order of the special folders, after INBOX.
+var specialOrder = []string{`\Drafts`, `\Sent`, `\Archive`, `\Junk`, `\Trash`}
+
+// folderRows orders folders for the pane: INBOX and its subfolders, then
+// Drafts, Sent, the archive, Junk and Trash, then the rest by name. Each
+// folder brings its subfolders along, indented under it.
+//
+// The archive is the folder flagged \Archive, or else a top-level folder
+// named Archive or Archives; if it has a subfolder for this year, that
+// subfolder is shown there instead ("Archives 2026"), and the other years
+// stay under Archives with the rest.
+func folderRows(folders []cache.Folder, counts map[int64]cache.Counts, year int) []folderRow {
 	sorted := slices.Clone(folders)
-	inInbox := func(f cache.Folder) bool {
-		return f.Name == "INBOX" || (f.Delimiter != "" && strings.HasPrefix(f.Name, "INBOX"+f.Delimiter))
-	}
-	slices.SortStableFunc(sorted, func(a, b cache.Folder) int {
-		if ia, ib := inInbox(a), inInbox(b); ia != ib {
-			if ia {
-				return -1
-			}
-			return 1
-		}
+	slices.SortFunc(sorted, func(a, b cache.Folder) int {
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
-	rows := make([]folderRow, len(sorted))
-	for i, f := range sorted {
-		r := folderRow{folder: f, label: f.Name, counts: counts[f.ID]}
-		if f.Delimiter != "" {
-			parts := strings.Split(f.Name, f.Delimiter)
-			r.label, r.depth = parts[len(parts)-1], len(parts)-1
+	under := func(child, parent cache.Folder) bool {
+		return child.Name == parent.Name ||
+			(parent.Delimiter != "" && strings.HasPrefix(child.Name, parent.Name+parent.Delimiter))
+	}
+	parts := func(f cache.Folder) []string {
+		if f.Delimiter == "" {
+			return []string{f.Name}
 		}
-		rows[i] = r
+		return strings.Split(f.Name, f.Delimiter)
+	}
+
+	// Pick the special folders.
+	special := map[string]cache.Folder{}
+	for _, f := range sorted {
+		if s := f.SpecialUse; slices.Contains(specialOrder, s) {
+			if _, taken := special[s]; !taken {
+				special[s] = f
+			}
+		}
+	}
+	if _, ok := special[`\Archive`]; !ok {
+		for _, f := range sorted {
+			if p := parts(f); len(p) == 1 && (strings.EqualFold(f.Name, "Archive") || strings.EqualFold(f.Name, "Archives")) {
+				special[`\Archive`] = f
+				break
+			}
+		}
+	}
+	yearLabel := ""
+	if a, ok := special[`\Archive`]; ok && a.Delimiter != "" {
+		thisYear := a.Name + a.Delimiter + strconv.Itoa(year)
+		for _, f := range sorted {
+			if f.Name == thisYear {
+				special[`\Archive`] = f
+				yearLabel = a.Name + " " + strconv.Itoa(year) // "Archives 2026"
+				break
+			}
+		}
+	}
+
+	var rows []folderRow
+	placed := map[int64]bool{}
+	// group appends root and its subfolders, indented relative to root.
+	group := func(root cache.Folder, label string) {
+		base := len(parts(root)) - 1
+		for _, f := range sorted {
+			if placed[f.ID] || !under(f, root) {
+				continue
+			}
+			p := parts(f)
+			r := folderRow{folder: f, label: p[len(p)-1], depth: len(p) - 1 - base, counts: counts[f.ID]}
+			if f.ID == root.ID && label != "" {
+				r.label = label
+			}
+			rows = append(rows, r)
+			placed[f.ID] = true
+		}
+	}
+	// Special folders inside INBOX, with their subfolders, go to their own
+	// place, not INBOX's.
+	subtree := func(root cache.Folder, mark bool) {
+		for _, f := range sorted {
+			if under(f, root) {
+				placed[f.ID] = mark
+			}
+		}
+	}
+	for _, s := range specialOrder {
+		if f, ok := special[s]; ok && f.Name != "INBOX" {
+			subtree(f, true)
+		}
+	}
+	for _, f := range sorted {
+		if f.Name == "INBOX" {
+			group(f, "")
+		}
+	}
+	for _, s := range specialOrder {
+		f, ok := special[s]
+		if !ok || f.Name == "INBOX" {
+			continue
+		}
+		subtree(f, false)
+		label := ""
+		if s == `\Archive` {
+			label = yearLabel
+		}
+		group(f, label)
+	}
+	for _, f := range sorted {
+		if !placed[f.ID] {
+			// The top of a remaining tree: depth counts from the top level.
+			p := parts(f)
+			rows = append(rows, folderRow{folder: f, label: p[len(p)-1], depth: len(p) - 1, counts: counts[f.ID]})
+			placed[f.ID] = true
+		}
 	}
 	return rows
 }
@@ -95,7 +184,7 @@ func (u *ui) refreshPaneRows() {
 	if err != nil {
 		u.notice = "Reading folder counts failed: " + err.Error()
 	}
-	u.pane.rows = folderRows(folders, counts)
+	u.pane.rows = folderRows(folders, counts, u.now().Year())
 	u.pane.sel = 0
 	for i, r := range u.pane.rows {
 		if r.folder.ID == u.folder.ID {
