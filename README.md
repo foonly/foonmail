@@ -32,6 +32,11 @@ There is also **foonmailctl**, a command-line tool for the daemon.
 - Writing in the window or in your own editor, with drafts, attachments,
   replies, reply-all and forwarding. Sent mail waits 10 seconds before it
   goes, so you can take it back.
+- Attachments opened with your desktop's default app or saved to your
+  download folder. Programs, scripts and web pages are only saved, never
+  opened.
+- A mail's HTML version shown in your browser when the text isn't enough,
+  with scripts and remote images blocked.
 - Archive, junk and trash with one key. A folder pane lists all folders,
   with the special ones (Drafts, Sent, Archive, Junk, Trash) first.
 - A tray icon (StatusNotifierItem) that lights up for new mail, and
@@ -120,6 +125,8 @@ The bottom line of the window always shows the keys for what you're doing.
 | Space / - | page down / up |
 | h | show or hide quoted text |
 | number, Enter | open that link |
+| o / w | open / save the attachment (type its number first if there are several) |
+| b | show the message's HTML in your browser, with remote content blocked |
 | Esc | back to the list |
 
 | Writing | |

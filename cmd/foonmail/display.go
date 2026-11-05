@@ -147,13 +147,24 @@ func linkLines(links []render.Link, width int) []string {
 	return out
 }
 
-func attachmentLines(atts []render.Attachment) []string {
-	var out []string
-	for _, a := range atts {
+// listedAttachments are the attachments listed under a message, which o
+// and w number from 1. Embedded images belong to the HTML and aren't
+// listed.
+func listedAttachments(m *render.Message) []render.Attachment {
+	var out []render.Attachment
+	for _, a := range m.Attachments {
 		if a.Inline && strings.HasPrefix(a.ContentType, "image/") {
-			continue // embedded images belong to the HTML, not the attachment list
+			continue
 		}
-		out = append(out, fmt.Sprintf("%s  (%s, %s)", render.SafeFilename(a.Filename), a.ContentType, humanSize(a.Size)))
+		out = append(out, a)
+	}
+	return out
+}
+
+func attachmentLines(m *render.Message) []string {
+	var out []string
+	for i, a := range listedAttachments(m) {
+		out = append(out, fmt.Sprintf("#%d %s  (%s, %s)", i+1, render.SafeFilename(a.Filename), a.ContentType, humanSize(a.Size)))
 	}
 	return out
 }

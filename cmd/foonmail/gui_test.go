@@ -586,7 +586,7 @@ func TestDisplayHelpers(t *testing.T) {
 		{Filename: "../../evil.pdf", ContentType: "application/pdf", Size: 2048},
 		{Filename: "logo.png", ContentType: "image/png", Inline: true, ContentID: "x"},
 	}
-	if got := attachmentLines(atts); len(got) != 1 || got[0] != "evil.pdf  (application/pdf, 2 KB)" {
+	if got := attachmentLines(&render.Message{Attachments: atts}); len(got) != 1 || got[0] != "#1 evil.pdf  (application/pdf, 2 KB)" {
 		t.Errorf("attachments = %q", got)
 	}
 }

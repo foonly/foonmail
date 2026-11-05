@@ -146,6 +146,7 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 		mono:        font.Font{Typeface: "monospace"},
 		results:     make(chan func(), 256),
 		openURL:     xdgOpen,
+		downloads:   downloadDir,
 		editorArgv:  defaultEditor,
 		focusWindow: hyprlandFocus,
 	}

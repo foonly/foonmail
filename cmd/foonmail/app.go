@@ -64,7 +64,7 @@ type openConv struct {
 	showQuotes bool
 	cur        int         // the message n and p move between, and replies answer
 	heights    map[int]int // each message's height in px when last drawn
-	linkInput  string      // digits typed to open a link
+	linkInput  string      // digits typed: a link (Enter) or attachment (o, w) number
 	list       widget.List
 }
 
@@ -123,7 +123,8 @@ type ui struct {
 	down          bool               // the daemon didn't answer the last Status call
 	notice        string             // transient message in the status bar
 	pendingDelete string             // conversation key waiting for a second d in Trash
-	openURL       func(string) error // opens a link; xdg-open
+	openURL       func(string) error // opens a link or a file; xdg-open
+	downloads     func() string      // where w saves attachments
 	focusWindow   func()             // brings the window forward; hyprctl on Hyprland
 	focusReq      event.Tag
 

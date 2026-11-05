@@ -25,7 +25,7 @@ import (
 
 const (
 	listHints = "j/k move · Enter open · c or ← folders · m new · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -430,6 +430,9 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "R"},
 			key.Filter{Name: "G"},
 			key.Filter{Name: "F"},
+			key.Filter{Name: "O"},
+			key.Filter{Name: "W"},
+			key.Filter{Name: "B"},
 			key.Filter{Name: key.NameSpace},
 			key.Filter{Name: "-"},
 			key.Filter{Name: key.NamePageDown},
@@ -498,6 +501,12 @@ func (u *ui) updateView(gtx layout.Context) {
 			u.newMessage()
 		case name == "R":
 			u.replyFromView(kindReply)
+		case name == "O":
+			u.attachment(o, false)
+		case name == "W":
+			u.attachment(o, true)
+		case name == "B":
+			u.openInBrowser(o)
 		case name == "G":
 			u.replyFromView(kindReplyAll)
 		case name == "F":
@@ -586,7 +595,7 @@ func (u *ui) layoutView(gtx layout.Context) layout.Dimensions {
 	}
 	hints := viewHints
 	if o.linkInput != "" {
-		hints = fmt.Sprintf("Open link [%s]: Enter opens, Esc cancels", o.linkInput)
+		hints = fmt.Sprintf("%s: Enter opens link [%s] · o opens attachment #%s · w saves it · Esc cancels", o.linkInput, o.linkInput, o.linkInput)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(u.convHeader),
@@ -764,16 +773,17 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 					return layout.Inset{Top: 2}.Layout(gtx, l.Layout)
 				}))
 			}
-			if atts := attachmentLines(r.Attachments); len(atts) > 0 {
-				rows = append(rows, layout.Rigid(u.section("Attachments", atts, false)))
+			if atts := attachmentLines(r); len(atts) > 0 {
+				rows = append(rows, layout.Rigid(u.section("Attachments", atts, true)))
 			}
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 	}
 }
 
-// section lists lines under a title; numbered lines start with "[N] ",
-// which is colored like the links in the text.
+// section lists lines under a title; numbered lines start with their
+// number ("[N]" or "#N") and a space, and the number is colored like the
+// links in the text.
 func (u *ui) section(title string, lines []string, numbered bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
@@ -785,7 +795,7 @@ func (u *ui) section(title string, lines []string, numbered bool) layout.Widget 
 		}
 		for _, line := range lines {
 			num := ""
-			if i := strings.Index(line, "] "); numbered && i > 0 {
+			if i := strings.IndexByte(line, ' '); numbered && i > 0 {
 				num, line = line[:i+2], line[i+2:]
 			}
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
