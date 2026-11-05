@@ -62,9 +62,9 @@ type openConv struct {
 	conv       conversation
 	parts      []*part
 	showQuotes bool
-	cur        int    // the message n and p move between, and replies answer
+	cur        int         // the message n and p move between, and replies answer
 	heights    map[int]int // each message's height in px when last drawn
-	linkInput  string // digits typed to open a link
+	linkInput  string      // digits typed to open a link
 	list       widget.List
 }
 
