@@ -153,3 +153,12 @@ The tests use in-memory IMAP and SMTP servers and a private D-Bus bus, so
 they never touch your real mail or desktop. A few optional tests read your
 own cache. To run them, copy `local.test.env.example` to `local.test.env`
 (it is gitignored) and fill it in.
+
+## License
+
+Copyright © 2026 Niklas Schönberg
+
+foonmail is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. See [LICENSE](LICENSE).
