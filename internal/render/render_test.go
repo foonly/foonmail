@@ -66,7 +66,7 @@ func TestFormatFlowed(t *testing.T) {
 		Options{})
 	want := "This paragraph was sent from a phone and soft-wrapped at seventy-two columns.\n\n" +
 		"> A quoted line that is also flowed.\n>> Deeper.\n\n-- \nSig"
-	if m.Text != strings.Replace(want, "-- \n", "--\n", 1) {
+	if m.Text != want {
 		t.Errorf("flowed:\n%q\nwant\n%q", m.Text, want)
 	}
 }

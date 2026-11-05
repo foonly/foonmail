@@ -341,7 +341,9 @@ func tidy(s string) string {
 	out := make([]string, 0, len(lines))
 	blank := 0
 	for _, l := range lines {
-		l = strings.TrimRight(l, " \t\u00a0")
+		if l != "-- " { // the signature separator keeps its space
+			l = strings.TrimRight(l, " \t\u00a0")
+		}
 		if l == "" {
 			blank++
 			continue

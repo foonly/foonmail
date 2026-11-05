@@ -63,7 +63,8 @@ func (d *Draft) Empty() bool {
 	return strings.TrimSpace(d.To+d.Cc+d.Bcc+d.Subject+d.Body) == "" && len(d.Attachments) == 0
 }
 
-// Build renders the draft as an RFC 5322 message: a UTF-8 text part, plus
+// Build renders the draft as an RFC 5322 message: a UTF-8 format=flowed
+// text part (see encodeFlowed), plus
 // multipart/mixed with the attachments when there are any. Bcc is kept;
 // the daemon leaves it out of what goes over the wire. Date and Message-ID
 // are left to the daemon.
@@ -111,10 +112,10 @@ func build(d *Draft, strict bool) ([]byte, error) {
 	header("User-Agent", "foonmail")
 
 	if len(d.Attachments) == 0 {
-		header("Content-Type", "text/plain; charset=utf-8")
+		header("Content-Type", "text/plain; charset=utf-8; format=flowed")
 		header("Content-Transfer-Encoding", "quoted-printable")
 		buf.WriteString("\r\n")
-		if err := writeQP(&buf, d.Body); err != nil {
+		if err := writeQP(&buf, encodeFlowed(d.Body)); err != nil {
 			return nil, err
 		}
 		return buf.Bytes(), nil
@@ -125,13 +126,13 @@ func build(d *Draft, strict bool) ([]byte, error) {
 	header("Content-Type", mime.FormatMediaType("multipart/mixed", map[string]string{"boundary": mw.Boundary()}))
 	buf.WriteString("\r\n")
 	pw, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type":              {"text/plain; charset=utf-8"},
+		"Content-Type":              {"text/plain; charset=utf-8; format=flowed"},
 		"Content-Transfer-Encoding": {"quoted-printable"},
 	})
 	if err != nil {
 		return nil, err
 	}
-	if err := writeQP(pw, d.Body); err != nil {
+	if err := writeQP(pw, encodeFlowed(d.Body)); err != nil {
 		return nil, err
 	}
 	for _, a := range d.Attachments {
