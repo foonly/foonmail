@@ -10,6 +10,9 @@
 # Where the mail cache lives. Default: ~/.cache/foonmail
 # cache_dir = "~/.cache/foonmail"
 
+# Where what exists only locally (the outbox) lives. Default: ~/.local/share/foonmail
+# data_dir = "~/.local/share/foonmail"
+
 [[account]]
 name = "uplink"                      # short id: a-z, 0-9, _ and -
 email = "you@example.com"            # primary address

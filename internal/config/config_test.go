@@ -32,12 +32,16 @@ username = "niklas"
 
 func TestDefaults(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/tmp/xdg-cache")
+	t.Setenv("XDG_DATA_HOME", "/tmp/xdg-data")
 	c, err := Load(write(t, minimal))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.CacheDir != "/tmp/xdg-cache/foonmail" {
 		t.Errorf("CacheDir = %q", c.CacheDir)
+	}
+	if c.DataDir != "/tmp/xdg-data/foonmail" {
+		t.Errorf("DataDir = %q", c.DataDir)
 	}
 	a := c.Accounts[0]
 	if a.IMAP.Address() != "mail.uplink.fi:993" || a.IMAP.Security != SecurityTLS {

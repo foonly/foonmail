@@ -22,8 +22,12 @@ import (
 
 // Config is the whole configuration file.
 type Config struct {
-	// CacheDir holds the mail cache database. Default: $XDG_CACHE_HOME/foonmail.
-	CacheDir string    `toml:"cache_dir"`
+	// CacheDir holds the mail cache database, which can be rebuilt from the
+	// server. Default: $XDG_CACHE_HOME/foonmail.
+	CacheDir string `toml:"cache_dir"`
+	// DataDir holds what exists only locally, such as the outbox. Default:
+	// $XDG_DATA_HOME/foonmail (~/.local/share/foonmail).
+	DataDir  string    `toml:"data_dir"`
 	Accounts []Account `toml:"account"`
 }
 
@@ -155,18 +159,12 @@ func (e *Error) Error() string {
 }
 
 func (c *Config) applyDefaults() error {
-	if c.CacheDir == "" {
-		dir, err := os.UserCacheDir()
-		if err != nil {
-			return err
-		}
-		c.CacheDir = filepath.Join(dir, "foonmail")
-	} else if strings.HasPrefix(c.CacheDir, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		c.CacheDir = filepath.Join(home, c.CacheDir[2:])
+	var err error
+	if c.CacheDir, err = defaultDir(c.CacheDir, os.UserCacheDir); err != nil {
+		return err
+	}
+	if c.DataDir, err = defaultDir(c.DataDir, userDataDir); err != nil {
+		return err
 	}
 	for i := range c.Accounts {
 		a := &c.Accounts[i]
@@ -213,6 +211,9 @@ func (c *Config) validate() []string {
 
 	if !filepath.IsAbs(c.CacheDir) {
 		add("cache_dir must be an absolute path or start with ~/: %q", c.CacheDir)
+	}
+	if !filepath.IsAbs(c.DataDir) {
+		add("data_dir must be an absolute path or start with ~/: %q", c.DataDir)
 	}
 	if len(c.Accounts) == 0 {
 		add("no accounts: add an [[account]] section")
@@ -316,3 +317,35 @@ func (a *Account) Addresses() []string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// defaultDir expands a configured directory: "" becomes base()/foonmail,
+// and a leading ~/ the home directory.
+func defaultDir(dir string, base func() (string, error)) (string, error) {
+	switch {
+	case dir == "":
+		b, err := base()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(b, "foonmail"), nil
+	case strings.HasPrefix(dir, "~/"):
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, dir[2:]), nil
+	}
+	return dir, nil
+}
+
+// userDataDir is $XDG_DATA_HOME, or ~/.local/share.
+func userDataDir() (string, error) {
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		return d, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share"), nil
+}
