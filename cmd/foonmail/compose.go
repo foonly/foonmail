@@ -118,7 +118,9 @@ func (u *ui) replyTo(e cache.Entry, rendered *render.Message, kind replyKind) {
 		}
 		u.startCompose(d, answering)
 	}
-	if rendered != nil && kind != kindForward {
+	// Converted HTML reads the same when quoted; plain text shown has its
+	// addresses shortened, so it is rendered again as written.
+	if rendered != nil && rendered.Source == render.SourceHTML && kind != kindForward {
 		build(nil, rendered)
 		return
 	}
@@ -157,14 +159,13 @@ func (u *ui) replyFromList(kind replyKind) {
 	u.replyTo(pick, nil, kind)
 }
 
-// replyFromView replies to the message shown at the top of the
-// conversation view.
+// replyFromView replies to the current message of the conversation view.
 func (u *ui) replyFromView(kind replyKind) {
 	o := u.conv
 	if o == nil || len(o.parts) == 0 {
 		return
 	}
-	p := o.parts[min(max(o.list.Position.First, 0), len(o.parts)-1)]
+	p := o.parts[min(max(o.cur, 0), len(o.parts)-1)]
 	u.replyTo(p.entry, p.rendered, kind)
 }
 

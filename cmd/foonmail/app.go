@@ -62,6 +62,7 @@ type openConv struct {
 	conv       conversation
 	parts      []*part
 	showQuotes bool
+	cur        int    // the message n and p move between, and replies answer
 	linkInput  string // digits typed to open a link
 	list       widget.List
 }
@@ -130,6 +131,7 @@ type ui struct {
 	mono                       font.Font
 	muted, line, barBg, accent color.NRGBA
 	selBg, selBgBlurred        color.NRGBA
+	quoteColors                []color.NRGBA // by quote depth, repeating
 }
 
 // post runs f on the UI goroutine and wakes the window.
@@ -272,7 +274,7 @@ func (u *ui) open() {
 	if target < 0 {
 		target = len(c.members) - 1
 	}
-	o.list.Position.First = target
+	o.list.Position.First, o.cur = target, target
 	u.conv, u.mode = o, modeView
 
 	toMark := c.folderUIDs(u.folder.ID, true)
@@ -283,7 +285,7 @@ func (u *ui) open() {
 			raw, err := u.loadRaw(p.entry.Summary)
 			var r *render.Message
 			if err == nil {
-				r, err = render.Render(raw, render.Options{LinkOffset: offset})
+				r, err = render.Render(raw, render.Options{LinkOffset: offset, LinkPlain: true})
 			}
 			if r != nil {
 				offset += len(r.Links)

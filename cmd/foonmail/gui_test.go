@@ -691,3 +691,35 @@ func TestFolderPaneMouse(t *testing.T) {
 		t.Errorf("clicking the second row of the list selected %q", h.selectedKey())
 	}
 }
+
+// n reaches the last message even when the list can't scroll that far,
+// and the current message is marked.
+func TestNextReachesShortLastMessage(t *testing.T) {
+	h := newHarness(t) // tall: the whole conversation fits
+	h.press("K")
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	o := h.u.conv
+	o.cur, o.list.Position = 0, layout.Position{}
+	h.frame()
+	for want := 1; want <= 2; want++ {
+		h.press("N")
+		if o.cur != want {
+			t.Fatalf("n: current message %d, want %d", o.cur, want)
+		}
+	}
+	h.press("N")
+	if o.cur != 2 {
+		t.Errorf("n past the end: current %d", o.cur)
+	}
+	h.press("P")
+	if o.cur != 1 {
+		t.Errorf("p: current %d, want 1", o.cur)
+	}
+	// Replies answer the current message.
+	h.press("R")
+	h.eventually("compose", func() bool { return h.u.mode == modeCompose })
+	if got := h.u.comp.base.InReplyTo; got != "b@test" {
+		t.Errorf("replied to %q, want the current message b@test", got)
+	}
+}

@@ -10,27 +10,125 @@ import (
 	"foonmail/internal/render"
 )
 
+// spanKind says how a stretch of the shown text is colored.
+type spanKind uint8
+
+const (
+	spanLink  spanKind = iota
+	spanQuote          // a quoted line; depth says how deep
+	spanMuted          // attributions, collapsed quotes, signatures
+)
+
+// textSpan is a byte range of the shown text and how to color it.
+type textSpan struct {
+	start, end int
+	kind       spanKind
+	depth      int // quote depth, from 1
+}
+
 // bodyText is the message text as shown: trailing quotes collapsed to one
 // line unless showQuotes is set. Quotes with answers between them always
 // stay visible.
 func bodyText(m *render.Message, showQuotes bool) string {
+	text, _ := bodyView(m, showQuotes)
+	return text
+}
+
+// bodyView is bodyText with the spans to color in it. Later spans take
+// precedence over earlier ones where they overlap.
+func bodyView(m *render.Message, showQuotes bool) (string, []textSpan) {
 	text := m.Text
-	if showQuotes {
-		return text
-	}
-	for i := len(m.Quotes) - 1; i >= 0; i-- {
-		q := m.Quotes[i]
-		if !q.Trailing {
+	var marks []textSpan // spans found by the renderer, kept through collapsing
+	for _, q := range m.Quotes {
+		if q.Attribution == "" {
 			continue
 		}
-		who := q.Who
-		if who == "" {
-			who = "the earlier message"
+		end := q.End
+		if nl := strings.IndexByte(text[q.Start:q.End], '\n'); nl >= 0 {
+			end = q.Start + nl
 		}
-		line := fmt.Sprintf("[… quoted text from %s, %d lines · h shows it]", who, q.Lines)
-		text = text[:q.Start] + line + text[q.End:]
+		marks = append(marks, textSpan{start: q.Start, end: end, kind: spanMuted})
 	}
-	return text
+	for _, l := range m.LinkSpans {
+		marks = append(marks, textSpan{start: l.Start, end: l.End, kind: spanLink})
+	}
+	if !showQuotes {
+		for i := len(m.Quotes) - 1; i >= 0; i-- {
+			q := m.Quotes[i]
+			if !q.Trailing {
+				continue
+			}
+			who := q.Who
+			if who == "" {
+				who = "the earlier message"
+			}
+			line := fmt.Sprintf("[… quoted text from %s, %d lines · h shows it]", who, q.Lines)
+			text = text[:q.Start] + line + text[q.End:]
+			delta := len(line) - (q.End - q.Start)
+			kept := marks[:0]
+			for _, s := range marks {
+				switch {
+				case s.end <= q.Start:
+				case s.start >= q.End:
+					s.start += delta
+					s.end += delta
+				default:
+					continue // inside the collapsed quote
+				}
+				kept = append(kept, s)
+			}
+			marks = append(kept, textSpan{start: q.Start, end: q.Start + len(line), kind: spanMuted})
+		}
+	}
+	return text, append(lineSpans(text), marks...)
+}
+
+// lineSpans finds quoted lines and the signature in shown text.
+func lineSpans(text string) []textSpan {
+	var spans []textSpan
+	sig := -1 // where an open signature started
+	for start := 0; start < len(text); {
+		end := strings.IndexByte(text[start:], '\n')
+		if end < 0 {
+			end = len(text)
+		} else {
+			end += start
+		}
+		line := text[start:end]
+		if d := quoteDepth(line); d > 0 {
+			if sig >= 0 {
+				spans = append(spans, textSpan{start: sig, end: start, kind: spanMuted})
+				sig = -1
+			}
+			spans = append(spans, textSpan{start: start, end: end, kind: spanQuote, depth: d})
+		} else if sig < 0 && (line == "-- " || line == "--") {
+			sig = start
+		}
+		start = end + 1
+	}
+	if sig >= 0 {
+		spans = append(spans, textSpan{start: sig, end: len(text), kind: spanMuted})
+	}
+	return spans
+}
+
+// quoteDepth counts the ">" a line starts with, spaces between them
+// allowed.
+func quoteDepth(line string) int {
+	d := 0
+	for _, c := range []byte(line) {
+		switch c {
+		case '>':
+			d++
+		case ' ':
+			if d == 0 {
+				return 0
+			}
+		default:
+			return d
+		}
+	}
+	return d
 }
 
 // hasCollapsible reports whether h would change anything.
@@ -132,4 +230,12 @@ func humanSize(n int) string {
 		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+// displayName is an address's name, or the address when it has none.
+func displayName(a render.Address) string {
+	if a.Name != "" {
+		return a.Name
+	}
+	return a.Addr
 }

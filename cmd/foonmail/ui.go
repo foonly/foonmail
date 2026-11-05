@@ -478,13 +478,14 @@ func (u *ui) updateView(gtx layout.Context) {
 				u.open()
 			}
 		case name == "N":
-			o.list.Position = layout.Position{First: min(o.list.Position.First+1, len(o.parts)-1)}
+			o.cur = min(o.cur+1, len(o.parts)-1)
+			o.list.Position = layout.Position{First: o.cur}
 		case name == "P":
-			first := o.list.Position.First
-			if o.list.Position.Offset == 0 {
-				first--
+			// Back to the top of the current message first, if it is scrolled.
+			if o.list.Position.First != o.cur || o.list.Position.Offset == 0 {
+				o.cur = max(o.cur-1, 0)
 			}
-			o.list.Position = layout.Position{First: max(first, 0)}
+			o.list.Position = layout.Position{First: o.cur}
 		case name == "H":
 			o.showQuotes = !o.showQuotes
 		case name == "A":
@@ -574,9 +575,29 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 	defer pointer.PassOp{}.Push(gtx.Ops).Pop()
 	event.Op(gtx.Ops, u.viewPtr)
 	width := max(40, gtx.Constraints.Max.X/max(1, gtx.Sp(u.th.TextSize)*6/10))
-	return material.List(u.th, &o.list).Layout(gtx, len(o.parts), func(gtx layout.Context, i int) layout.Dimensions {
-		return layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+	dims := material.List(u.th, &o.list).Layout(gtx, len(o.parts), func(gtx layout.Context, i int) layout.Dimensions {
+		inset := layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}
+		if i != o.cur || len(o.parts) < 2 {
+			return inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+		}
+		// The current message gets a bar down its left side.
+		m := op.Record(gtx.Ops)
+		d := inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+		call := m.Stop()
+		top := gtx.Dp(inset.Top)
+		if i > 0 {
+			top += gtx.Dp(1) // below the divider
+		}
+		bar := image.Rect(gtx.Dp(5), top, gtx.Dp(8), d.Size.Y-gtx.Dp(inset.Bottom))
+		paint.FillShape(gtx.Ops, u.accent, clip.UniformRRect(bar, gtx.Dp(1)).Op(gtx.Ops))
+		call.Add(gtx.Ops)
+		return d
 	})
+	// Scrolled out of sight, the current message becomes the top one shown.
+	if pos := o.list.Position; o.cur < pos.First || o.cur >= pos.First+pos.Count {
+		o.cur = pos.First
+	}
+	return dims
 }
 
 // partWidget draws one message of a conversation: who and when, the body,
@@ -584,31 +605,57 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		e := p.entry
-		who := senderName(e.From)
+		who, addr := senderName(e.From), ""
 		if r := p.rendered; r != nil && len(r.From) > 0 {
-			who = addressList(r.From)
+			who, addr = displayName(r.From[0]), r.From[0].Addr
+			if who == addr {
+				addr = ""
+			}
+		}
+		nameColor := u.th.Fg
+		if i == o.cur && len(o.parts) > 1 {
+			nameColor = u.accent
 		}
 		meta := e.Date.Local().Format("Mon, 2 Jan 2006 15:04")
-		if e.FolderID != u.folder.ID {
-			meta += " · sent"
-		}
+		sent := e.FolderID != u.folder.ID
 		var rows []layout.FlexChild
 		if i > 0 {
 			rows = append(rows, layout.Rigid(u.divider))
 		}
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						l := material.Label(u.th, u.th.TextSize, who)
-						l.Font.Weight, l.MaxLines = font.Bold, 1
-						return l.Layout(gtx)
-					}),
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						l := material.Label(u.th, u.th.TextSize*0.9, meta)
-						l.Color = u.muted
-						return l.Layout(gtx)
+						return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := material.Label(u.th, u.th.TextSize, who)
+								l.Font.Weight, l.MaxLines, l.Color = font.Bold, 1, nameColor
+								return l.Layout(gtx)
+							}),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								if addr == "" {
+									return layout.Dimensions{Size: image.Pt(gtx.Constraints.Min.X, 0)}
+								}
+								l := material.Label(u.th, u.th.TextSize*0.9, "  "+addr)
+								l.Color, l.MaxLines = u.muted, 1
+								return l.Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if !sent {
+									return layout.Dimensions{}
+								}
+								l := material.Label(u.th, u.th.TextSize*0.9, "sent · ")
+								l.Color = u.accent
+								return l.Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := material.Label(u.th, u.th.TextSize*0.9, meta)
+								l.Color = u.muted
+								return l.Layout(gtx)
+							}),
+						)
 					}),
+					layout.Rigid(u.recipients(p.rendered)),
 				)
 			})
 		}))
@@ -626,14 +673,13 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 			rows = append(rows, note("Couldn't show this message: "+p.err.Error()))
 		default:
 			r := p.rendered
-			text := bodyText(r, o.showQuotes)
+			text, spans := bodyView(r, o.showQuotes)
 			if r.Source == render.SourceNone {
-				text = "(This message has no text.)"
+				text, spans = "(This message has no text.)", nil
 			}
+			colors := u.spanColors(spans)
 			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := material.Label(u.th, u.th.TextSize, text)
-				l.State, l.Font = &p.body, u.mono
-				return l.Layout(gtx)
+				return u.coloredText(gtx, &p.body, u.mono, u.th.TextSize, text, colors)
 			}))
 			if r.Source == render.SourceHTML {
 				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -645,17 +691,19 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 				}))
 			}
 			if links := linkLines(r.Links, width); len(links) > 0 {
-				rows = append(rows, layout.Rigid(u.section("Links", links)))
+				rows = append(rows, layout.Rigid(u.section("Links", links, true)))
 			}
 			if atts := attachmentLines(r.Attachments); len(atts) > 0 {
-				rows = append(rows, layout.Rigid(u.section("Attachments", atts)))
+				rows = append(rows, layout.Rigid(u.section("Attachments", atts, false)))
 			}
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 	}
 }
 
-func (u *ui) section(title string, lines []string) layout.Widget {
+// section lists lines under a title; numbered lines start with "[N] ",
+// which is colored like the links in the text.
+func (u *ui) section(title string, lines []string, numbered bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -665,10 +713,22 @@ func (u *ui) section(title string, lines []string) layout.Widget {
 			}),
 		}
 		for _, line := range lines {
+			num := ""
+			if i := strings.Index(line, "] "); numbered && i > 0 {
+				num, line = line[:i+2], line[i+2:]
+			}
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := material.Label(u.th, u.th.TextSize*0.9, line)
-				l.MaxLines, l.Font = 1, u.mono
-				return l.Layout(gtx)
+				return layout.Flex{}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						l := material.Label(u.th, u.th.TextSize*0.9, num)
+						l.Font, l.Color = u.mono, u.accent
+						return l.Layout(gtx)
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						l := material.Label(u.th, u.th.TextSize*0.9, line)
+						l.MaxLines, l.Font = 1, u.mono
+						return l.Layout(gtx)
+					}))
 			}))
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -707,4 +767,61 @@ func (u *ui) statusBar(hints string) layout.Widget {
 		call.Add(gtx.Ops)
 		return dims
 	}
+}
+
+// recipients is the "to … cc …" line under a message's sender.
+func (u *ui) recipients(r *render.Message) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		if r == nil || len(r.To)+len(r.Cc) == 0 {
+			return layout.Dimensions{}
+		}
+		var parts []layout.FlexChild
+		field := func(label string, as []render.Address) {
+			if len(as) == 0 {
+				return
+			}
+			names := make([]string, len(as))
+			for i, a := range as {
+				names[i] = displayName(a)
+			}
+			prefix := label + " "
+			if len(parts) > 0 {
+				prefix = "   " + prefix
+			}
+			parts = append(parts,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					l := material.Label(u.th, u.th.TextSize*0.85, prefix)
+					l.Color = u.muted
+					return l.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					l := material.Label(u.th, u.th.TextSize*0.85, strings.Join(names, ", "))
+					l.MaxLines = 1
+					return l.Layout(gtx)
+				}))
+		}
+		field("to", r.To)
+		field("cc", r.Cc)
+		return layout.Inset{Top: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx, parts...)
+		})
+	}
+}
+
+// spanColors gives the shown text's spans their theme colors.
+func (u *ui) spanColors(spans []textSpan) []colorSpan {
+	out := make([]colorSpan, 0, len(spans))
+	for _, s := range spans {
+		c := u.muted
+		switch s.kind {
+		case spanLink:
+			c = u.accent
+		case spanQuote:
+			if len(u.quoteColors) > 0 {
+				c = u.quoteColors[(s.depth-1)%len(u.quoteColors)]
+			}
+		}
+		out = append(out, colorSpan{start: s.start, end: s.end, color: c})
+	}
+	return out
 }
