@@ -175,8 +175,6 @@ func (u *ui) leaveCompose() {
 	switch u.mode {
 	case modeList:
 		u.focusReq = u.listTag
-	case modeFolders:
-		u.focusReq = u.folderTag
 	}
 }
 

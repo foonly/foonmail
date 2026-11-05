@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	listHints = "j/k move · Enter open · m new · r reply · g reply all · f forward · c folders · N read/unread · / filter · q quit"
+	listHints = "j/k move · Enter open · c or ← folders · m new · r reply · g reply all · f forward · N read/unread · / filter · q quit"
 	viewHints = "Esc back · j/k or →/← conversations · n/p messages · r reply · g reply all · f forward · h quoted text · number + Enter opens a link"
 )
 
@@ -44,10 +44,13 @@ func (u *ui) layout(gtx layout.Context) {
 		switch m {
 		case modeList:
 			u.updateList(gtx)
+			// The pane may have opened just now; its handling must run in this
+			// frame too so it keeps the focus it was given.
+			if u.pane.open {
+				u.updateFolderPane(gtx)
+			}
 		case modeView:
 			u.updateView(gtx)
-		case modeFolders:
-			u.updateFolders(gtx)
 		case modeCompose:
 			u.updateCompose(gtx)
 		}
@@ -60,8 +63,6 @@ func (u *ui) layout(gtx layout.Context) {
 		u.layoutList(gtx)
 	case modeView:
 		u.layoutView(gtx)
-	case modeFolders:
-		u.layoutFolders(gtx)
 	case modeCompose:
 		u.layoutCompose(gtx)
 	}
@@ -131,6 +132,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: key.NameEnter},
 			key.Filter{Focus: t, Name: "N", Required: key.ModShift},
 			key.Filter{Focus: t, Name: "C"},
+			key.Filter{Focus: t, Name: key.NameLeftArrow},
 			key.Filter{Focus: t, Name: "/", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: "M"},
 			key.Filter{Focus: t, Name: "R"},
@@ -164,8 +166,8 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.openSelected()
 		case "N":
 			u.toggleRead()
-		case "C":
-			u.openFolders()
+		case "C", key.NameLeftArrow:
+			u.openPane()
 		case "M":
 			u.newMessage()
 		case "R":
@@ -251,12 +253,21 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(u.header),
 		layout.Rigid(u.divider),
-		layout.Flexed(1, u.listArea),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{}.Layout(gtx,
+				layout.Rigid(u.layoutPane),
+				layout.Flexed(1, u.listArea),
+			)
+		}),
 	}
 	if u.searching {
 		children = append(children, layout.Rigid(u.divider), layout.Rigid(u.searchBar))
 	}
-	children = append(children, layout.Rigid(u.statusBar(listHints)))
+	hints := listHints
+	if u.pane.open {
+		hints = "j/k preview a folder · Enter or → open and sync it · Esc, c or ← back to " + u.pane.origin.Name
+	}
+	children = append(children, layout.Rigid(u.statusBar(hints)))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 

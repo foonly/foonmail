@@ -44,7 +44,6 @@ type mode int
 const (
 	modeList mode = iota
 	modeView
-	modeFolders
 	modeCompose
 )
 
@@ -111,10 +110,7 @@ type ui struct {
 	expl       *explorer.Explorer // the portal file picker; nil in tests
 	editorArgv func() []string    // the external editor command
 
-	folders   []folderRow
-	folderSel int
-	folderTag *int
-	folderLst widget.List
+	pane folderPane
 
 	viewPtr  *int // pointer tag over the conversation, to see the mouse button
 	pressing bool // a mouse button is down in the conversation
@@ -389,17 +385,27 @@ func (u *ui) toggleRead() {
 	}
 }
 
-// switchFolder shows another folder. Folders other than INBOX are synced
-// in the background; the cached copy shows meanwhile.
+// switchFolder shows another folder and syncs it.
 func (u *ui) switchFolder(f cache.Folder) {
+	u.showFolder(f)
+	u.mode = modeList
+	u.focusReq = u.listTag
+	u.syncFolder(f)
+}
+
+// showFolder shows a folder's cached contents.
+func (u *ui) showFolder(f cache.Folder) {
 	u.folder = f
 	u.search.SetText("")
 	u.searching = false
 	u.list.Position = layout.Position{}
 	u.sel = 0
 	u.reload()
-	u.mode = modeList
-	u.focusReq = u.listTag
+}
+
+// syncFolder syncs a folder in the background; the cached copy shows
+// meanwhile. INBOX is kept current by IDLE and needs no sync.
+func (u *ui) syncFolder(f cache.Folder) {
 	if f.Name == "INBOX" || u.daemon == nil {
 		return
 	}

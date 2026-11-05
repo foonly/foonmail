@@ -420,42 +420,95 @@ func TestToggleReadRevertsOnFailure(t *testing.T) {
 	})
 }
 
-func TestFolderSwitch(t *testing.T) {
+func TestFolderPane(t *testing.T) {
 	h := newHarness(t)
 	h.press("C")
-	if h.u.mode != modeFolders {
-		t.Fatal("c did not open the folder picker")
+	if !h.u.pane.open || !h.r.Source().Focused(h.u.pane.tag) {
+		t.Fatal("c did not open the folder pane with focus")
 	}
 	var labels []string
-	for _, r := range h.u.folders {
+	for _, r := range h.u.pane.rows {
 		labels = append(labels, r.label)
 	}
 	if !slices.Equal(labels, []string{"INBOX", "Archive", "Sent"}) {
 		t.Errorf("folders = %v", labels)
 	}
-	if h.u.folders[h.u.folderSel].folder.ID != h.inbox.ID {
-		t.Error("the picker didn't start on the current folder")
+	if h.u.pane.rows[h.u.pane.sel].folder.ID != h.inbox.ID {
+		t.Error("the pane didn't start on the current folder")
+	}
+
+	// Moving previews the folder from the cache, without syncing it.
+	h.press("J") // Archive
+	h.press("J") // Sent
+	if h.u.folder.ID != h.sent.ID || len(h.u.convs) != 1 {
+		t.Errorf("preview: folder %q with %d conversations", h.u.folder.Name, len(h.u.convs))
+	}
+	if got := h.daemon.calls().synced; len(got) != 0 {
+		t.Errorf("previewing synced folders: %v", got)
+	}
+
+	// Esc goes back to where we were, still without syncing.
+	h.press(key.NameEscape)
+	if h.u.pane.open || h.u.folder.ID != h.inbox.ID || len(h.daemon.calls().synced) != 0 {
+		t.Errorf("after Esc: open %v, folder %q, synced %v", h.u.pane.open, h.u.folder.Name, h.daemon.calls().synced)
+	}
+	h.press("J")
+	if h.selectedKey() != "x" {
+		t.Errorf("the list didn't get the keyboard back: selected %q", h.selectedKey())
+	}
+
+	// ← opens it too; → chooses, which syncs and returns to the list.
+	h.press(key.NameLeftArrow)
+	if !h.u.pane.open {
+		t.Fatal("← did not open the pane")
 	}
 	h.press("J") // Archive
-	h.press(key.NameReturn)
-	if h.u.mode != modeList || h.u.folder.ID != h.archive.ID {
-		t.Fatalf("mode %v, folder %q", h.u.mode, h.u.folder.Name)
+	h.press(key.NameRightArrow)
+	if h.u.pane.open || h.u.folder.ID != h.archive.ID {
+		t.Fatalf("after →: open %v, folder %q", h.u.pane.open, h.u.folder.Name)
 	}
-	h.eventually("Archive synced on open", func() bool {
+	h.eventually("Archive synced once chosen", func() bool {
 		return slices.Equal(h.daemon.calls().synced, []int64{h.archive.ID})
 	})
-	if len(h.u.convs) != 0 {
-		t.Errorf("Archive shows %d conversations", len(h.u.convs))
+	if !h.r.Source().Focused(h.u.listTag) {
+		t.Error("the list should have the keyboard after choosing")
 	}
-	// The list has the keyboard after switching.
+
+	// Choosing INBOX doesn't sync it: IDLE keeps it current.
 	h.press("C")
 	h.press("K")
 	h.press(key.NameReturn)
-	if h.u.folder.ID != h.inbox.ID {
-		t.Errorf("back to INBOX failed: %q", h.u.folder.Name)
+	if h.u.folder.ID != h.inbox.ID || len(h.daemon.calls().synced) != 1 {
+		t.Errorf("back to INBOX: folder %q, synced %v", h.u.folder.Name, h.daemon.calls().synced)
 	}
-	if got := h.daemon.calls().synced; len(got) != 1 {
-		t.Errorf("INBOX is kept in sync by IDLE and shouldn't be synced on open: %v", got)
+}
+
+func TestPaneSlides(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+	h.u.now = func() time.Time { return now }
+	h.u.openPane()
+	gtx := layout.Context{Ops: new(op.Ops), Source: h.r.Source(), Constraints: layout.Exact(image.Pt(800, 600)),
+		Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
+	if s := h.u.paneShown(gtx); s != 0 {
+		t.Errorf("at the start: %v", s)
+	}
+	now = now.Add(paneDuration / 2)
+	if s := h.u.paneShown(gtx); s <= 0.5 || s >= 1 {
+		t.Errorf("halfway (eased out): %v", s)
+	}
+	now = now.Add(paneDuration)
+	if s := h.u.paneShown(gtx); s != 1 {
+		t.Errorf("after the slide: %v", s)
+	}
+	h.u.closePane()
+	now = now.Add(paneDuration / 2)
+	if s := h.u.paneShown(gtx); s <= 0 || s >= 0.5 {
+		t.Errorf("closing halfway: %v", s)
+	}
+	now = now.Add(paneDuration)
+	if s := h.u.paneShown(gtx); s != 0 {
+		t.Errorf("closed: %v", s)
 	}
 }
 
@@ -524,10 +577,10 @@ func TestArrowsMoveBetweenConversations(t *testing.T) {
 	h.eventually("next conversation", func() bool { return h.u.conv.conv.key == "x" && h.loaded() })
 	h.press(key.NameLeftArrow)
 	h.eventually("previous conversation", func() bool { return h.u.conv.conv.key == "a" && h.loaded() })
-	// At the first conversation, ← stays put.
+	// At the first conversation, â stays put.
 	h.press(key.NameLeftArrow)
 	if h.u.conv.conv.key != "a" || h.u.mode != modeView {
-		t.Errorf("← at the first conversation: key %q, mode %v", h.u.conv.conv.key, h.u.mode)
+		t.Errorf("â at the first conversation: key %q, mode %v", h.u.conv.conv.key, h.u.mode)
 	}
 }
 
@@ -565,6 +618,6 @@ func TestTextFocusIsReleasedWithoutSelection(t *testing.T) {
 		t.Fatal("text kept focus with nothing selected")
 	}
 	h.press(key.NameRightArrow)
-	h.eventually("→ after clicking into the text reaches the next conversation",
+	h.eventually("â after clicking into the text reaches the next conversation",
 		func() bool { return h.u.conv.conv.key == "x" })
 }
