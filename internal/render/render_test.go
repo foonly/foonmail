@@ -332,3 +332,10 @@ func TestReplyHeaders(t *testing.T) {
 		t.Errorf("MessageID %q, References %v, ReplyTo %v", m.MessageID, m.References, m.ReplyTo)
 	}
 }
+
+func TestLenientMessageIDs(t *testing.T) {
+	m := mustRender(t, raw([]string{"Message-ID: <abc123>", "References: <one> <two@x>", "Content-Type: text/plain"}, "x"), Options{})
+	if m.MessageID != "abc123" || len(m.References) != 2 || m.References[0] != "one" {
+		t.Errorf("MessageID %q, References %v", m.MessageID, m.References)
+	}
+}

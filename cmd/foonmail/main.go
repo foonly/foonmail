@@ -20,6 +20,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
+	"gioui.org/x/explorer"
 	"github.com/godbus/dbus/v5"
 
 	"foonmail/internal/cache"
@@ -46,6 +47,7 @@ func main() {
 		w := new(app.Window)
 		w.Option(app.Title("foonmail"), app.Size(unit.Dp(1000), unit.Dp(720)))
 		u.w = w
+		u.expl = explorer.NewExplorer(w)
 		if err := run(w, u); err != nil {
 			fmt.Fprintln(os.Stderr, "foonmail:", err)
 			os.Exit(1)
@@ -120,16 +122,17 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 
 func newUI(db *cache.DB, log *slog.Logger) *ui {
 	u := &ui{
-		th:        material.NewTheme(),
-		db:        db,
-		log:       log,
-		now:       time.Now,
-		listTag:   new(int),
-		folderTag: new(int),
-		viewPtr:   new(int),
-		mono:      font.Font{Typeface: "monospace"},
-		results:   make(chan func(), 256),
-		openURL:   xdgOpen,
+		th:         material.NewTheme(),
+		db:         db,
+		log:        log,
+		now:        time.Now,
+		listTag:    new(int),
+		folderTag:  new(int),
+		viewPtr:    new(int),
+		mono:       font.Font{Typeface: "monospace"},
+		results:    make(chan func(), 256),
+		openURL:    xdgOpen,
+		editorArgv: defaultEditor,
 	}
 	u.list.Axis = layout.Vertical
 	u.folderLst.Axis = layout.Vertical
@@ -170,7 +173,11 @@ func run(w *app.Window, u *ui) error {
 	var ops op.Ops
 	focused := false
 	for {
-		switch e := w.Event().(type) {
+		ev := w.Event()
+		if u.expl != nil {
+			u.expl.ListenEvents(ev)
+		}
+		switch e := ev.(type) {
 		case app.DestroyEvent:
 			return e.Err
 		case app.ConfigEvent:

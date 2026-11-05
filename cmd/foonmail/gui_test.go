@@ -37,6 +37,7 @@ type fakeDaemon struct {
 	fetched  []int64
 	flagged  []string
 	synced   []int64
+	sent     [][]byte
 	err      error // returned by every call
 	flagsErr error
 }
@@ -74,6 +75,22 @@ func (d *fakeDaemon) SetFlags(_ context.Context, _ int64, uids []uint32, add, re
 }
 
 func (d *fakeDaemon) Acknowledge(context.Context) error { return d.err }
+
+func (d *fakeDaemon) Send(_ context.Context, account string, raw []byte) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.err != nil {
+		return 0, d.err
+	}
+	d.sent = append(d.sent, raw)
+	return int64(len(d.sent)), nil
+}
+
+func (d *fakeDaemon) sentMessages() [][]byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.sent)
+}
 
 func (d *fakeDaemon) Status(context.Context) ([]rpc.AccountStatus, error) {
 	if d.err != nil {
@@ -115,9 +132,9 @@ type harness struct {
 }
 
 func rawMsg(from, subject, msgID, inReplyTo, body string) []byte {
-	h := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <%s>\r\n", from, subject, msgID)
+	h := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <%s@test>\r\n", from, subject, msgID)
 	if inReplyTo != "" {
-		h += fmt.Sprintf("In-Reply-To: <%s>\r\nReferences: <%s>\r\n", inReplyTo, inReplyTo)
+		h += fmt.Sprintf("In-Reply-To: <%s@test>\r\nReferences: <%s@test>\r\n", inReplyTo, inReplyTo)
 	}
 	ct := "text/plain"
 	if strings.HasPrefix(body, "<") {
@@ -183,7 +200,7 @@ func newHarness(t *testing.T) *harness {
 	h.archive, _ = db.FolderByID(ctx, h.archive.ID)
 
 	u := newUI(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	u.account = &config.Account{Name: "uplink", Email: "niklas@uplink.fi"}
+	u.account = &config.Account{Name: "uplink", Email: "niklas@uplink.fi", DisplayName: "Niklas"}
 	u.own = u.account.Addresses()
 	u.accountID, u.folder, u.daemon = acct, h.inbox, d
 	u.sent = &h.sent

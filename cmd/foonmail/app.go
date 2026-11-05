@@ -18,6 +18,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"gioui.org/x/explorer"
 
 	"foonmail/internal/cache"
 	"foonmail/internal/config"
@@ -33,6 +34,7 @@ type daemon interface {
 	SetFlags(ctx context.Context, folderID int64, uids []uint32, add, remove []string) error
 	Acknowledge(ctx context.Context) error
 	Status(ctx context.Context) ([]rpc.AccountStatus, error)
+	Send(ctx context.Context, account string, raw []byte) (int64, error)
 }
 
 type mode int
@@ -41,6 +43,7 @@ const (
 	modeList mode = iota
 	modeView
 	modeFolders
+	modeCompose
 )
 
 // part is one message of the open conversation.
@@ -101,6 +104,10 @@ type ui struct {
 	searching bool
 
 	conv *openConv
+	comp *composer
+
+	expl       *explorer.Explorer // the portal file picker; nil in tests
+	editorArgv func() []string    // the external editor command
 
 	folders   []folderRow
 	folderSel int

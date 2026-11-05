@@ -27,7 +27,7 @@ var (
 func original() *render.Message {
 	return &render.Message{
 		Subject: "Kahvi?", From: []render.Address{bob}, To: []render.Address{me, liisa},
-		Cc: []render.Address{{Addr: "BOB@example.com"}, {Addr: "pekka@example.com"}},
+		Cc:        []render.Address{{Addr: "BOB@example.com"}, {Addr: "pekka@example.com"}},
 		Date:      time.Date(2026, 11, 4, 14, 2, 0, 0, time.Local),
 		MessageID: "c@x", References: []string{"a@x", "b@x"},
 		Text: "Torstaina?\n\n> earlier\nBob",

@@ -178,8 +178,7 @@ func (m *Message) readHeader(h *mail.Header) {
 	m.To = addresses(h, "To")
 	m.Cc = addresses(h, "Cc")
 	m.ReplyTo = addresses(h, "Reply-To")
-	m.MessageID, _ = h.MessageID()
-	m.References, _ = h.MsgIDList("References")
+	m.MessageID, m.References = messageIDs(h)
 }
 
 func addresses(h *mail.Header, key string) []Address {
@@ -348,4 +347,25 @@ func tidy(s string) string {
 		out = append(out, l)
 	}
 	return strings.Join(out, "\n")
+}
+
+var msgIDPattern = regexp.MustCompile(`<([^<>\s]+)>`)
+
+// messageIDs reads Message-ID and References. Strict parsing rejects IDs
+// without an "@", which some systems produce; then the raw header is used,
+// so replies keep their threading.
+func messageIDs(h *mail.Header) (id string, refs []string) {
+	id, err := h.MessageID()
+	if err != nil || id == "" {
+		raw, _ := h.Text("Message-Id")
+		id = strings.Trim(strings.TrimSpace(raw), "<>")
+	}
+	refs, err = h.MsgIDList("References")
+	if err != nil {
+		raw, _ := h.Text("References")
+		for _, m := range msgIDPattern.FindAllStringSubmatch(raw, -1) {
+			refs = append(refs, m[1])
+		}
+	}
+	return id, refs
 }

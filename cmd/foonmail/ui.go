@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Enter open · c folders · N read/unread · / filter · = and * first/last · q quit"
-	viewHints = "Esc, q or i back · j/k or →/← next/previous conversation · n/p next/previous message · Space and - page · h quoted text · number + Enter opens a link"
+	listHints = "j/k move · Enter open · m new · r reply · g reply all · f forward · c folders · N read/unread · / filter · q quit"
+	viewHints = "Esc back · j/k or →/← conversations · n/p messages · r reply · g reply all · f forward · h quoted text · number + Enter opens a link"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -48,6 +48,8 @@ func (u *ui) layout(gtx layout.Context) {
 			u.updateView(gtx)
 		case modeFolders:
 			u.updateFolders(gtx)
+		case modeCompose:
+			u.updateCompose(gtx)
 		}
 		if u.mode == m {
 			break
@@ -60,6 +62,8 @@ func (u *ui) layout(gtx layout.Context) {
 		u.layoutView(gtx)
 	case modeFolders:
 		u.layoutFolders(gtx)
+	case modeCompose:
+		u.layoutCompose(gtx)
 	}
 	u.releaseTextFocus(gtx)
 	if u.focusReq != nil {
@@ -128,6 +132,10 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "N", Required: key.ModShift},
 			key.Filter{Focus: t, Name: "C"},
 			key.Filter{Focus: t, Name: "/", Optional: key.ModShift},
+			key.Filter{Focus: t, Name: "M"},
+			key.Filter{Focus: t, Name: "R"},
+			key.Filter{Focus: t, Name: "G"},
+			key.Filter{Focus: t, Name: "F"},
 			key.Filter{Focus: t, Name: key.NameEscape},
 			key.Filter{Focus: t, Name: "Q"},
 		)
@@ -158,6 +166,14 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.toggleRead()
 		case "C":
 			u.openFolders()
+		case "M":
+			u.newMessage()
+		case "R":
+			u.replyFromList(kindReply)
+		case "G":
+			u.replyFromList(kindReplyAll)
+		case "F":
+			u.replyFromList(kindForward)
 		case "/":
 			u.searching = true
 			u.focusReq = &u.search
@@ -381,6 +397,10 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "N"},
 			key.Filter{Name: "P"},
 			key.Filter{Name: "H"},
+			key.Filter{Name: "M"},
+			key.Filter{Name: "R"},
+			key.Filter{Name: "G"},
+			key.Filter{Name: "F"},
 			key.Filter{Name: key.NameSpace},
 			key.Filter{Name: "-"},
 			key.Filter{Name: key.NamePageDown},
@@ -438,6 +458,14 @@ func (u *ui) updateView(gtx layout.Context) {
 			o.list.Position = layout.Position{First: max(first, 0)}
 		case name == "H":
 			o.showQuotes = !o.showQuotes
+		case name == "M":
+			u.newMessage()
+		case name == "R":
+			u.replyFromView(kindReply)
+		case name == "G":
+			u.replyFromView(kindReplyAll)
+		case name == "F":
+			u.replyFromView(kindForward)
 		case name == key.NameSpace || name == key.NamePageDown:
 			u.scrollBody(page)
 		case name == "-" || name == key.NamePageUp:
