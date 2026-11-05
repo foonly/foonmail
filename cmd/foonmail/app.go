@@ -116,11 +116,12 @@ type ui struct {
 	viewPtr  *int // pointer tag over the conversation, to see the mouse button
 	pressing bool // a mouse button is down in the conversation
 
-	status   *rpc.AccountStatus // nil until known
-	down     bool               // the daemon didn't answer the last Status call
-	notice   string             // transient message in the status bar
-	openURL  func(string) error // opens a link; xdg-open
-	focusReq event.Tag
+	status      *rpc.AccountStatus // nil until known
+	down        bool               // the daemon didn't answer the last Status call
+	notice      string             // transient message in the status bar
+	openURL     func(string) error // opens a link; xdg-open
+	focusWindow func()             // brings the window forward; hyprctl on Hyprland
+	focusReq    event.Tag
 
 	results chan func()
 

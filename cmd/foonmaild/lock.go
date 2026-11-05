@@ -10,6 +10,9 @@ import (
 	"syscall"
 )
 
+// errLocked means another foonmaild already uses the cache directory.
+var errLocked = errors.New("another foonmaild is already running")
+
 // acquireLock makes sure only one daemon uses a cache directory. The lock
 // is an flock on a file in that directory, released by the kernel when the
 // process exits, however it exits.
@@ -26,7 +29,7 @@ func acquireLock(dir string) (*os.File, error) {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			pid, _ := os.ReadFile(path)
-			return nil, fmt.Errorf("another foonmaild (pid %s) is already using %s", strings.TrimSpace(string(pid)), dir)
+			return nil, fmt.Errorf("%w: pid %s is using %s", errLocked, strings.TrimSpace(string(pid)), dir)
 		}
 		return nil, fmt.Errorf("locking %s: %w", path, err)
 	}

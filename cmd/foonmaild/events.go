@@ -68,7 +68,8 @@ type hub struct {
 	db       *cache.DB
 	notifier notifier
 	tray     trayIcon
-	signals  emitter // nil until the D-Bus service is up
+	signals  emitter   // nil until the D-Bus service is up
+	gui      guiOpener // opens the GUI on a click; nil without a session bus
 	delay    time.Duration
 
 	order    []string
@@ -287,14 +288,38 @@ func (h *hub) pruneRead(ctx context.Context, account string, a *accountState) {
 	}
 }
 
-// open handles a click: the user is looking now, so nothing is new.
+// open handles a click on a notification or the tray: the user is looking
+// now, so nothing is new, and the GUI shows the message (or just comes
+// forward), starting through D-Bus activation if it isn't running.
 func (h *hub) open(req openRequest) {
-	if req.uid != 0 {
-		h.log.Info("open message requested (the GUI doesn't exist yet)", "account", req.account, "uid", req.uid)
-	} else {
-		h.log.Info("tray clicked (the GUI doesn't exist yet)")
-	}
 	clear(h.newMail)
+	if h.gui == nil {
+		return
+	}
+	var folder int64
+	if a := h.accounts[req.account]; a != nil && req.uid != 0 {
+		folder = a.inbox
+	}
+	gui, log := h.gui, h.log
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var err error
+		if folder != 0 {
+			err = gui.ShowMessage(ctx, folder, req.uid)
+		} else {
+			err = gui.Show(ctx)
+		}
+		if err != nil {
+			log.Warn("couldn't open the GUI", "err", err)
+		}
+	}()
+}
+
+// guiOpener is what the hub needs from rpc.GUIClient.
+type guiOpener interface {
+	Show(ctx context.Context) error
+	ShowMessage(ctx context.Context, folderID int64, uid uint32) error
 }
 
 // flush shows notifications for the mail gathered during a burst.

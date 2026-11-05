@@ -24,8 +24,8 @@ import (
 	"foonmail/internal/cache"
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
-	"foonmail/internal/notify"
 	"foonmail/internal/outbox"
+	"foonmail/internal/rpc"
 	"foonmail/internal/tray"
 )
 
@@ -42,6 +42,9 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	if err := run(*configPath, log); err != nil {
 		fmt.Fprintln(os.Stderr, "foonmaild:", err)
+		if errors.Is(err, errLocked) {
+			os.Exit(3) // the systemd unit doesn't restart on this
+		}
 		os.Exit(1)
 	}
 }
@@ -170,18 +173,8 @@ func run(configPath string, log *slog.Logger) error {
 // daemon still syncs without them, for example on a desktop with no tray.
 // It must run before h.run starts.
 func connectDesktop(h *hub, conn *dbus.Conn, log *slog.Logger) (closeDesktop func()) {
-	if n, err := notify.New(conn); err != nil {
-		log.Warn("no notification server: running without notifications", "err", err)
-	} else {
-		srv := n.Server()
-		log.Info("notification server", "name", srv.Name, "version", srv.Version,
-			"actions", srv.Has("actions"), "capabilities", srv.Capabilities)
-		if !srv.Has("actions") {
-			log.Warn("the notification server has no action buttons: clicking notifications " +
-				"won't open mail, and undo send will need another way")
-		}
-		h.notifier = n
-	}
+	h.notifier = &lazyNotifier{conn: conn, log: log}
+	h.gui = rpc.NewGUIClient(conn)
 	t, err := tray.New(conn, "foonmail", tray.State{Status: tray.Active, IconName: "mail-read", Tooltip: "foonmail"},
 		h.activate, log)
 	if err != nil {

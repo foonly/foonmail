@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -160,4 +161,43 @@ func TestServiceSending(t *testing.T) {
 	if _, err := e.client.Send(ctx, "uplink", []byte("x")); !errors.Is(err, rpc.ErrTooLarge) || !strings.Contains(err.Error(), "limit is 5 MB") {
 		t.Errorf("Send too large: err = %v", err)
 	}
+}
+
+type fakeGUI struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (g *fakeGUI) Show(context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, "show")
+	return nil
+}
+
+func (g *fakeGUI) ShowMessage(_ context.Context, folder int64, uid uint32) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, fmt.Sprintf("message %d %d", folder, uid))
+	return nil
+}
+
+func (g *fakeGUI) all() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.calls)
+}
+
+func TestClicksOpenTheGUI(t *testing.T) {
+	e := newHubEnv(t, true)
+	gui := &fakeGUI{}
+	e.h.gui = gui
+	e.arrive(9, "bob@example.com", "Hi", false)
+	e.eventually("notification", func() bool { return len(e.notes.all()) == 1 })
+	e.notes.all()[0].OnAction("default")
+	want := fmt.Sprintf("message %d 9", e.inbox)
+	e.eventually("GUI asked to show the message", func() bool { return slices.Contains(gui.all(), want) })
+
+	e.h.activate() // the tray
+	e.eventually("GUI raised from the tray", func() bool { return slices.Contains(gui.all(), "show") })
 }

@@ -1,0 +1,22 @@
+# systemd user unit for foonmaild. `make install` fills in @BINDIR@,
+# installs it to ~/.config/systemd/user and enables it.
+#
+# Logs: journalctl --user -u foonmaild -f
+
+[Unit]
+Description=foonmail daemon: syncs mail, tray icon and notifications
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=fi.uplink.Foonmail
+ExecStart=@BINDIR@/foonmaild
+Restart=on-failure
+RestartSec=10
+# 3: another foonmaild already holds the cache (one started by hand);
+# restarting won't help.
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=graphical-session.target

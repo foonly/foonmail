@@ -10,7 +10,7 @@ GOFLAGS_ALL = -tags=$(TAGS)
 BIN      := bin
 COMMANDS := foonmaild foonmail foonmailctl
 
-.PHONY: all build test race vet check run run-daemon install clean help
+.PHONY: all build test race vet check run run-daemon install uninstall clean help
 
 all: build
 
@@ -43,9 +43,46 @@ run:
 run-daemon:
 	$(GO) run $(GOFLAGS_ALL) ./cmd/foonmaild -v
 
-## install: install foonmaild and foonmail into $(GOBIN) or ~/go/bin
-install:
-	$(GO) install $(GOFLAGS_ALL) $(addprefix ./cmd/,$(COMMANDS))
+# Where `make install` puts things: per user, no root needed.
+PREFIX   ?= $(HOME)/.local
+BINDIR   ?= $(PREFIX)/bin
+DATADIR  ?= $(PREFIX)/share
+UNITDIR  ?= $(HOME)/.config/systemd/user
+SYSTEMCTL ?= systemctl --user
+SUBST     = sed -e 's|@BINDIR@|$(BINDIR)|g'
+
+DESKTOP_FILE := $(DATADIR)/applications/foonmail.desktop
+DBUS_FILES   := $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.service \
+                $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.GUI.service
+UNIT_FILE    := $(UNITDIR)/foonmaild.service
+
+## install: install the programs to ~/.local/bin, with a desktop file, D-Bus
+##          activation and the foonmaild systemd unit (enabled and restarted)
+install: build
+	install -d $(BINDIR) $(DATADIR)/applications $(DATADIR)/dbus-1/services $(UNITDIR)
+	@# A running binary can't be overwritten ("text file busy"), so copy then rename.
+	for c in $(COMMANDS); do install -m755 $(BIN)/$$c $(BINDIR)/.$$c.new && mv -f $(BINDIR)/.$$c.new $(BINDIR)/$$c; done
+	$(SUBST) contrib/foonmail.desktop.in > $(DESKTOP_FILE)
+	$(SUBST) contrib/dbus/fi.uplink.Foonmail.service.in > $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.service
+	$(SUBST) contrib/dbus/fi.uplink.Foonmail.GUI.service.in > $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.GUI.service
+	$(SUBST) contrib/systemd/foonmaild.service.in > $(UNIT_FILE)
+	-update-desktop-database -q $(DATADIR)/applications 2>/dev/null
+	-busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig 2>/dev/null
+	$(SYSTEMCTL) daemon-reload
+	$(SYSTEMCTL) enable foonmaild.service
+	@if $(SYSTEMCTL) restart foonmaild.service; then \
+		echo "foonmaild is running under systemd: journalctl --user -u foonmaild -f"; \
+	else \
+		echo "foonmaild didn't start. If you run it by hand, stop that one and run: $(SYSTEMCTL) restart foonmaild"; \
+	fi
+
+## uninstall: remove what install put in place, and stop the daemon
+uninstall:
+	-$(SYSTEMCTL) disable --now foonmaild.service
+	rm -f $(addprefix $(BINDIR)/,$(COMMANDS)) $(DESKTOP_FILE) $(DBUS_FILES) $(UNIT_FILE)
+	-$(SYSTEMCTL) daemon-reload
+	-update-desktop-database -q $(DATADIR)/applications 2>/dev/null
+	@echo "Your config, cache and outbox are left in place."
 
 ## clean: remove built binaries
 clean:

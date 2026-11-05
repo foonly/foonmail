@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=foonmail
+GenericName=Mail
+Comment=Read and write mail
+Exec=@BINDIR@/foonmail
+Icon=internet-mail
+Terminal=false
+Categories=Network;Email;
+Keywords=mail;email;inbox;
+StartupWMClass=foonmail
+StartupNotify=false

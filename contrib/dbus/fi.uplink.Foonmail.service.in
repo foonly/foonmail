@@ -1,0 +1,6 @@
+# D-Bus activation for foonmaild: a call to the daemon's interface (from
+# the GUI or foonmailctl) starts it through systemd if it isn't running.
+[D-BUS Service]
+Name=fi.uplink.Foonmail
+Exec=@BINDIR@/foonmaild
+SystemdService=foonmaild.service

@@ -38,6 +38,10 @@ func main() {
 
 	u, cleanup, err := setup(*configPath, *accountName, log)
 	if err != nil {
+		if errors.Is(err, errAlreadyRunning) {
+			fmt.Println("foonmail is already running; its window was raised")
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, "foonmail:", err)
 		os.Exit(1)
 	}
@@ -108,6 +112,17 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 		// Keep the client even if the daemon is down now: refreshStatus notices
 		// when it comes up, from its StatusChanged signals.
 		u.daemon = client
+		if err := exportGUI(conn, u); errors.Is(err, errAlreadyRunning) {
+			// One window is enough: raise the running one instead.
+			ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
+			rpc.NewGUIClient(conn).Show(ctx2)
+			cancel()
+			conn.Close()
+			db.Close()
+			return nil, nil, errAlreadyRunning
+		} else if err != nil {
+			log.Warn("the GUI interface isn't available: notifications can't open messages", "err", err)
+		}
 		// Subscribe even if the daemon is down now; its signals arrive once it starts.
 		events, stop, err := client.Subscribe()
 		if err == nil {
@@ -122,16 +137,17 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 
 func newUI(db *cache.DB, log *slog.Logger) *ui {
 	u := &ui{
-		th:         material.NewTheme(),
-		db:         db,
-		log:        log,
-		now:        time.Now,
-		listTag:    new(int),
-		viewPtr:    new(int),
-		mono:       font.Font{Typeface: "monospace"},
-		results:    make(chan func(), 256),
-		openURL:    xdgOpen,
-		editorArgv: defaultEditor,
+		th:          material.NewTheme(),
+		db:          db,
+		log:         log,
+		now:         time.Now,
+		listTag:     new(int),
+		viewPtr:     new(int),
+		mono:        font.Font{Typeface: "monospace"},
+		results:     make(chan func(), 256),
+		openURL:     xdgOpen,
+		editorArgv:  defaultEditor,
+		focusWindow: hyprlandFocus,
 	}
 	u.list.Axis = layout.Vertical
 	u.pane.tag = new(int)

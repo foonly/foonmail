@@ -41,7 +41,7 @@ func TestLockIsExclusive(t *testing.T) {
 	}
 	// flock is per open file description, so a second acquire in this same
 	// process conflicts just like another process would.
-	if _, err := acquireLock(dir); err == nil || !strings.Contains(err.Error(), "already using") {
+	if _, err := acquireLock(dir); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Errorf("second lock: err = %v, want 'already using'", err)
 	}
 	f.Close()
