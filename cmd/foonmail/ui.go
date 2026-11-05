@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Enter open · c or ← folders · m new · r reply · g reply all · f forward · N read/unread · / filter · q quit"
-	viewHints = "Esc back · j/k or →/← conversations · n/p messages · r reply · g reply all · f forward · h quoted text · number + Enter opens a link"
+	listHints = "j/k move · Enter open · c or ← folders · m new · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
+	viewHints = "Esc back · j/k or →/← conversations · n/p messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -134,6 +134,10 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "C"},
 			key.Filter{Focus: t, Name: key.NameLeftArrow},
 			key.Filter{Focus: t, Name: "/", Optional: key.ModShift},
+			key.Filter{Focus: t, Name: "A"},
+			key.Filter{Focus: t, Name: "S"},
+			key.Filter{Focus: t, Name: "D"},
+			key.Filter{Focus: t, Name: key.NameDeleteForward},
 			key.Filter{Focus: t, Name: "M"},
 			key.Filter{Focus: t, Name: "R"},
 			key.Filter{Focus: t, Name: "G"},
@@ -168,6 +172,12 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.toggleRead()
 		case "C", key.NameLeftArrow:
 			u.openPane()
+		case "A":
+			u.moveConversation(toArchive)
+		case "S":
+			u.moveConversation(toJunk)
+		case "D", key.NameDeleteForward:
+			u.moveConversation(toTrash)
 		case "M":
 			u.newMessage()
 		case "R":
@@ -412,6 +422,10 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "N"},
 			key.Filter{Name: "P"},
 			key.Filter{Name: "H"},
+			key.Filter{Name: "A"},
+			key.Filter{Name: "S"},
+			key.Filter{Name: "D"},
+			key.Filter{Name: key.NameDeleteForward},
 			key.Filter{Name: "M"},
 			key.Filter{Name: "R"},
 			key.Filter{Name: "G"},
@@ -473,6 +487,12 @@ func (u *ui) updateView(gtx layout.Context) {
 			o.list.Position = layout.Position{First: max(first, 0)}
 		case name == "H":
 			o.showQuotes = !o.showQuotes
+		case name == "A":
+			u.moveConversation(toArchive)
+		case name == "S":
+			u.moveConversation(toJunk)
+		case name == "D" || name == key.NameDeleteForward:
+			u.moveConversation(toTrash)
 		case name == "M":
 			u.newMessage()
 		case name == "R":

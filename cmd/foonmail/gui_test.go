@@ -42,6 +42,8 @@ type fakeDaemon struct {
 	sent     [][]byte
 	drafts   [][]byte
 	deleted  []string
+	moved    []string
+	moveErr  error
 	err      error // returned by every call
 	flagsErr error
 }
@@ -105,6 +107,19 @@ func (d *fakeDaemon) DeleteMessages(_ context.Context, folderID int64, uids []ui
 	defer d.mu.Unlock()
 	d.deleted = append(d.deleted, fmt.Sprintf("%d:%v", folderID, uids))
 	return d.err
+}
+
+func (d *fakeDaemon) MoveMessages(_ context.Context, folderID int64, uids []uint32, dest int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.moved = append(d.moved, fmt.Sprintf("%d:%v->%d", folderID, uids, dest))
+	return d.moveErr
+}
+
+func (d *fakeDaemon) moveCalls() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.moved)
 }
 
 func (d *fakeDaemon) draftCalls() ([][]byte, []string) {

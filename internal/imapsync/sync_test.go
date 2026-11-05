@@ -662,3 +662,41 @@ func TestDeleteMessages(t *testing.T) {
 		t.Error("no FolderChanged after delete")
 	}
 }
+
+func TestMoveMessagesKeepsTheCachedBody(t *testing.T) {
+	e := newEnv(t, "Archive")
+	e.appendTo("INBOX", "keep me")
+	e.appendTo("INBOX", "stay")
+	e.start()
+	defer e.stop()
+	e.eventually("INBOX synced", func() bool { return len(e.uids("INBOX")) == 2 })
+	e.eventually("Archive listed", func() bool { _, ok := e.folder("Archive"); return ok })
+	inbox, _ := e.folder("INBOX")
+	archive, _ := e.folder("Archive")
+	if _, err := e.syncer.FetchBody(reqCtx(t), inbox.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.syncer.MoveMessages(reqCtx(t), inbox.ID, []uint32{1}, archive.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.eventually("INBOX without it", func() bool { return slices.Equal(e.uids("INBOX"), []uint32{2}) })
+	if got := e.uids("Archive"); len(got) != 1 {
+		t.Fatalf("Archive in the cache = %v", got)
+	}
+	list, _ := e.db.List(context.Background(), archive.ID, 10, 0)
+	if len(list) != 1 || list[0].Subject != "keep me" || !list[0].Fetched {
+		t.Errorf("moved message = %+v (want the body still cached)", list)
+	}
+	e.phoneSelect("INBOX")
+	msgs, _ := e.phone.Fetch(imap.SeqSetNum(1, 2), &imap.FetchOptions{UID: true}).Collect()
+	if len(msgs) != 1 || msgs[0].UID != 2 {
+		t.Errorf("server INBOX after the move: %+v", msgs)
+	}
+	if !e.folderChangedFor(inbox.ID) || !e.folderChangedFor(archive.ID) {
+		t.Error("FolderChanged missing for source or destination")
+	}
+	if err := e.syncer.MoveMessages(reqCtx(t), inbox.ID, []uint32{2}, 9999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown destination: err = %v", err)
+	}
+}

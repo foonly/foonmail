@@ -25,6 +25,7 @@ type backend interface {
 	FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error)
 	SetFlags(ctx context.Context, folderID int64, uids []uint32, add, remove []string) error
 	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
+	MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error
 	AppendDraft(ctx context.Context, raw []byte) error
 }
 
@@ -247,4 +248,14 @@ func (m methods) SaveDraft(account string, raw []byte) *dbus.Error {
 		return dbusError(fmt.Errorf("account %s isn't configured: %w", account, imapsync.ErrNotFound))
 	}
 	return dbusError(b.AppendDraft(ctx, raw))
+}
+
+func (m methods) MoveMessages(folderID int64, uids []uint32, dest int64) *dbus.Error {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	b, err := m.s.backendFor(ctx, folderID)
+	if err != nil {
+		return dbusError(err)
+	}
+	return dbusError(b.MoveMessages(ctx, folderID, uids, dest))
 }

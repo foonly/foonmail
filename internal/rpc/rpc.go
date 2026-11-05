@@ -14,6 +14,7 @@
 //	Outbox() → (a(xssssx))                      unfinished and recent messages
 //	SaveDraft(account s, raw ay)                store a draft in the Drafts folder
 //	DeleteMessages(folder x, uids au)           remove messages for good (UID EXPUNGE)
+//	MoveMessages(folder x, uids au, dest x)     move messages to another folder
 //
 // and three signals:
 //
@@ -251,4 +252,9 @@ func (c *Client) SaveDraft(ctx context.Context, account string, raw []byte) erro
 // DeleteMessages removes messages from a folder for good.
 func (c *Client) DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error {
 	return mapError(c.call(ctx, "DeleteMessages", folderID, uids).Err)
+}
+
+// MoveMessages moves messages to another folder of the same account.
+func (c *Client) MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error {
+	return mapError(c.call(ctx, "MoveMessages", folderID, uids, dest).Err)
 }

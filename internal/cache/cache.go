@@ -709,3 +709,12 @@ func joinAddrs(as []Address) string {
 	}
 	return strings.Join(s, ", ")
 }
+
+// FindByMessageID returns the cache id of a message in a folder by its
+// Message-ID header, and whether its raw content is cached.
+func (d *DB) FindByMessageID(ctx context.Context, folderID int64, messageID string) (id int64, fetched bool, err error) {
+	err = d.db.QueryRowContext(ctx, `
+		SELECT m.id, m.raw IS NOT NULL FROM locations l JOIN messages m ON m.id = l.message_id
+		WHERE l.folder_id = ? AND m.message_id = ? LIMIT 1`, folderID, messageID).Scan(&id, &fetched)
+	return id, fetched, err
+}

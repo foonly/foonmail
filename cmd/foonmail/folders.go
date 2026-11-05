@@ -83,34 +83,7 @@ func folderRows(folders []cache.Folder, counts map[int64]cache.Counts, year int)
 		return strings.Split(f.Name, f.Delimiter)
 	}
 
-	// Pick the special folders.
-	special := map[string]cache.Folder{}
-	for _, f := range sorted {
-		if s := f.SpecialUse; slices.Contains(specialOrder, s) {
-			if _, taken := special[s]; !taken {
-				special[s] = f
-			}
-		}
-	}
-	if _, ok := special[`\Archive`]; !ok {
-		for _, f := range sorted {
-			if p := parts(f); len(p) == 1 && (strings.EqualFold(f.Name, "Archive") || strings.EqualFold(f.Name, "Archives")) {
-				special[`\Archive`] = f
-				break
-			}
-		}
-	}
-	yearLabel := ""
-	if a, ok := special[`\Archive`]; ok && a.Delimiter != "" {
-		thisYear := a.Name + a.Delimiter + strconv.Itoa(year)
-		for _, f := range sorted {
-			if f.Name == thisYear {
-				special[`\Archive`] = f
-				yearLabel = a.Name + " " + strconv.Itoa(year) // "Archives 2026"
-				break
-			}
-		}
-	}
+	special, yearLabel := specialFolders(sorted, year)
 
 	var rows []folderRow
 	placed := map[int64]bool{}
@@ -410,4 +383,40 @@ func (u *ui) paneRow(gtx layout.Context, i int) layout.Dimensions {
 			}),
 		)
 	})
+}
+
+// specialFolders finds Drafts, Sent, the archive, Junk and Trash by their
+// special-use flags. The archive may instead be a top-level Archive or
+// Archives folder, and is then its subfolder for this year if there is
+// one; yearLabel names that ("Archives 2026"). folders must be sorted by
+// name.
+func specialFolders(folders []cache.Folder, year int) (special map[string]cache.Folder, yearLabel string) {
+	special = map[string]cache.Folder{}
+	for _, f := range folders {
+		if s := f.SpecialUse; slices.Contains(specialOrder, s) {
+			if _, taken := special[s]; !taken {
+				special[s] = f
+			}
+		}
+	}
+	if _, ok := special[`\Archive`]; !ok {
+		for _, f := range folders {
+			top := f.Delimiter == "" || !strings.Contains(f.Name, f.Delimiter)
+			if top && (strings.EqualFold(f.Name, "Archive") || strings.EqualFold(f.Name, "Archives")) {
+				special[`\Archive`] = f
+				break
+			}
+		}
+	}
+	if a, ok := special[`\Archive`]; ok && a.Delimiter != "" {
+		thisYear := a.Name + a.Delimiter + strconv.Itoa(year)
+		for _, f := range folders {
+			if f.Name == thisYear {
+				special[`\Archive`] = f
+				yearLabel = a.Name + " " + strconv.Itoa(year)
+				break
+			}
+		}
+	}
+	return special, yearLabel
 }

@@ -4,7 +4,9 @@ package dbustest
 
 import (
 	"bufio"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,7 +27,27 @@ func Start(t *testing.T) *Bus {
 	if err != nil {
 		t.Skip("dbus-daemon not installed")
 	}
-	cmd := exec.Command(path, "--session", "--nofork", "--nopidfile", "--print-address=1")
+	// A minimal config of its own: the standard session config would pull in
+	// the user's D-Bus service files, and a test asking for a name could
+	// then start the user's real programs.
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "bus.conf")
+	if err := os.WriteFile(conf, []byte(`<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:dir=`+dir+`</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(path, "--config-file="+conf, "--nofork", "--nopidfile", "--print-address=1")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

@@ -37,6 +37,7 @@ const (
 	reqFlags
 	reqAppend
 	reqDelete
+	reqMove
 )
 
 // request is work for the folder connection, from the GUI by way of the
@@ -48,6 +49,7 @@ type request struct {
 	uids        []uint32
 	add, remove []string
 	specialUse  string // reqAppend: the folder, by special-use flag
+	dest        int64  // reqMove: the destination folder
 	raw         []byte
 	reply       chan reqResult
 }
@@ -115,7 +117,7 @@ func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req re
 	if err != nil {
 		return reqResult{err: err}
 	}
-	readOnly := req.kind != reqFlags && req.kind != reqDelete
+	readOnly := req.kind != reqFlags && req.kind != reqDelete && req.kind != reqMove
 	sel, err := selectFolder(c, f.Name, readOnly, condstore)
 	if err != nil {
 		return reqResult{err: err}
@@ -136,6 +138,9 @@ func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req re
 	case reqFetch:
 		id, err := s.fetchBody(ctx, c, f, sel, req.uid, condstore)
 		return reqResult{messageID: id, err: err}
+
+	case reqMove:
+		return reqResult{err: s.moveMessages(ctx, c, f, req, condstore)}
 
 	case reqDelete:
 		err := s.deleteMessages(ctx, c, f, req.uids)
@@ -327,4 +332,87 @@ func (s *Syncer) deleteMessages(ctx context.Context, c *imapclient.Client, f cac
 		return err
 	}
 	return s.db.RemoveUIDs(ctx, f.ID, uids)
+}
+
+// MoveMessages moves messages to another folder of the same account.
+func (s *Syncer) MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	return s.request(ctx, request{kind: reqMove, folderID: folderID, uids: uids, dest: dest}).err
+}
+
+// moveMessages MOVEs messages from the selected folder (go-imap falls back
+// to COPY, \Deleted and EXPUNGE without MOVE), then syncs the destination
+// before forgetting the source copies, so the cached message, body
+// included, carries over instead of being dropped and fetched again.
+func (s *Syncer) moveMessages(ctx context.Context, c *imapclient.Client, f cache.Folder, req request, condstore bool) error {
+	dest, err := s.db.FolderByID(ctx, req.dest)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && dest.AccountID != s.accountID) {
+		return fmt.Errorf("destination folder %d: %w", req.dest, ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	if dest.ID == f.ID {
+		return nil
+	}
+	// The INBOX connection may hear of the move and drop the source copies,
+	// bodies and all, before the destination is synced here. Keep the bodies
+	// aside to give back to the destination copies.
+	type stashed struct {
+		messageID string
+		raw       []byte
+	}
+	var stash []stashed
+	for _, uid := range req.uids {
+		id, err := s.db.Location(ctx, f.ID, uid)
+		if err != nil {
+			continue
+		}
+		if raw, err := s.db.Raw(ctx, id); err == nil && raw != nil {
+			if h, err := s.db.Header(ctx, id); err == nil && h.MessageID != "" {
+				stash = append(stash, stashed{h.MessageID, raw})
+			}
+		}
+	}
+
+	if err := do(c, "move to "+dest.Name, func() error {
+		_, err := c.Move(imap.UIDSetNum(toUIDs(req.uids)...), dest.Name).Wait()
+		return err
+	}); err != nil {
+		return err
+	}
+	s.log.Info("moved", "from", f.Name, "to", dest.Name, "count", len(req.uids))
+
+	if err := do(c, "unselect", func() error { return c.Unselect().Wait() }); err != nil {
+		return err
+	}
+	sel, err := selectFolder(c, dest.Name, true, condstore)
+	if err != nil {
+		return err
+	}
+	res, err := s.syncSelected(ctx, c, dest, sel, condstore)
+	if err != nil {
+		return err
+	}
+	for _, st := range stash {
+		id, fetched, err := s.db.FindByMessageID(ctx, dest.ID, st.messageID)
+		if err != nil || fetched {
+			continue
+		}
+		var text string
+		if m, err := render.Render(st.raw, render.Options{}); err == nil {
+			text = m.Text
+		}
+		if err := s.db.SetRaw(ctx, id, st.raw, text); err != nil {
+			return err
+		}
+	}
+	if err := s.db.RemoveUIDs(ctx, f.ID, req.uids); err != nil {
+		return err
+	}
+	s.notifyFolder(dest.ID, res)
+	s.notify(FolderChanged{Account: s.acct.Name, FolderID: f.ID})
+	return nil
 }

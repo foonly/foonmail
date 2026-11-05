@@ -37,6 +37,7 @@ type daemon interface {
 	Send(ctx context.Context, account string, raw []byte) (int64, error)
 	SaveDraft(ctx context.Context, account string, raw []byte) error
 	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
+	MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error
 }
 
 type mode int
@@ -116,12 +117,13 @@ type ui struct {
 	viewPtr  *int // pointer tag over the conversation, to see the mouse button
 	pressing bool // a mouse button is down in the conversation
 
-	status      *rpc.AccountStatus // nil until known
-	down        bool               // the daemon didn't answer the last Status call
-	notice      string             // transient message in the status bar
-	openURL     func(string) error // opens a link; xdg-open
-	focusWindow func()             // brings the window forward; hyprctl on Hyprland
-	focusReq    event.Tag
+	status        *rpc.AccountStatus // nil until known
+	down          bool               // the daemon didn't answer the last Status call
+	notice        string             // transient message in the status bar
+	pendingDelete string             // conversation key waiting for a second d in Trash
+	openURL       func(string) error // opens a link; xdg-open
+	focusWindow   func()             // brings the window forward; hyprctl on Hyprland
+	focusReq      event.Tag
 
 	results chan func()
 

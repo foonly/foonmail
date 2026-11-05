@@ -59,6 +59,10 @@ func (b *fakeBackend) DeleteMessages(_ context.Context, folderID int64, uids []u
 	return b.record("delete")
 }
 
+func (b *fakeBackend) MoveMessages(_ context.Context, folderID int64, uids []uint32, dest int64) error {
+	return b.record("move")
+}
+
 func (b *fakeBackend) AppendDraft(_ context.Context, raw []byte) error {
 	return b.record("draft")
 }
@@ -237,7 +241,10 @@ func TestServiceDrafts(t *testing.T) {
 	if err := e.client.DeleteMessages(ctx, e.inbox, []uint32{4}); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.backend.recorded(); !slices.Equal(got, []string{"draft", "delete"}) {
+	if err := e.client.MoveMessages(ctx, e.inbox, []uint32{4}, 99); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.backend.recorded(); !slices.Equal(got, []string{"draft", "delete", "move"}) {
 		t.Errorf("backend calls = %v", got)
 	}
 	if err := e.client.SaveDraft(ctx, "nobody", []byte("x")); !errors.Is(err, rpc.ErrNotFound) {
