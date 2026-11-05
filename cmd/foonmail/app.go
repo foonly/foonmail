@@ -110,7 +110,8 @@ type ui struct {
 	expl       *explorer.Explorer // the portal file picker; nil in tests
 	editorArgv func() []string    // the external editor command
 
-	pane folderPane
+	pane    folderPane
+	listTop int // y where the folder pane and message list start
 
 	viewPtr  *int // pointer tag over the conversation, to see the mouse button
 	pressing bool // a mouse button is down in the conversation

@@ -251,7 +251,11 @@ func (u *ui) clearFilter() {
 
 func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 	children := []layout.FlexChild{
-		layout.Rigid(u.header),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			d := u.header(gtx)
+			u.listTop = d.Size.Y + gtx.Dp(1) // the divider below it
+			return d
+		}),
 		layout.Rigid(u.divider),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{}.Layout(gtx,

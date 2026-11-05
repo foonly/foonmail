@@ -255,19 +255,22 @@ func (u *ui) paneShown(gtx layout.Context) float32 {
 func (u *ui) layoutPane(gtx layout.Context) layout.Dimensions {
 	shown := u.paneShown(gtx)
 	w := int(float32(gtx.Dp(paneWidth)) * shown)
-	if u.pane.open {
-		// Register the pane even before it has slid out: Gio drops focus from
-		// a handler that has no input area in the frame.
-		area := clip.Rect{Max: image.Pt(max(w, 1), gtx.Constraints.Max.Y)}.Push(gtx.Ops)
-		event.Op(gtx.Ops, u.pane.tag)
-		u.pane.click.Add(gtx.Ops)
-		area.Pop()
-	}
-	if w <= 0 {
+	if w <= 0 && !u.pane.open {
 		return layout.Dimensions{}
 	}
-	size := image.Pt(w, gtx.Constraints.Max.Y)
+	// The area is at least 1 px wide: an open pane must register even before
+	// it has slid out, as Gio drops focus from a handler with no input area
+	// in the frame. Everything below is drawn inside it, so the list's own
+	// pointer handling (scrolling) doesn't hide clicks from the pane.
+	size := image.Pt(max(w, 1), gtx.Constraints.Max.Y)
 	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+	if u.pane.open {
+		event.Op(gtx.Ops, u.pane.tag)
+		u.pane.click.Add(gtx.Ops)
+	}
+	if w <= 0 {
+		return layout.Dimensions{Size: image.Pt(0, size.Y)}
+	}
 	paint.FillShape(gtx.Ops, u.barBg, clip.Rect{Max: size}.Op())
 	// Lay the content out at full width and let the clip reveal it, so the
 	// text slides in rather than reflowing.

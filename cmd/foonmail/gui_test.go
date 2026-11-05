@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/io/input"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
@@ -620,4 +622,52 @@ func TestTextFocusIsReleasedWithoutSelection(t *testing.T) {
 	h.press(key.NameRightArrow)
 	h.eventually("â after clicking into the text reaches the next conversation",
 		func() bool { return h.u.conv.conv.key == "x" })
+}
+
+func (h *harness) click(x, y float32, clicks int) {
+	h.t.Helper()
+	for range clicks {
+		pos := f32.Pt(x, y)
+		h.r.Queue(
+			pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: pos},
+			pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: pos},
+		)
+	}
+	h.frame()
+	h.frame()
+}
+
+func TestFolderPaneMouse(t *testing.T) {
+	h := newHarness(t)
+	h.u.now = time.Now // the slide needs a clock that moves
+	h.press("C")
+	h.eventually("pane slid out", func() bool {
+		return h.u.paneShown(layout.Context{Ops: new(op.Ops), Source: h.r.Source()}) == 1
+	})
+	row := float32(h.u.rowH)
+	y := float32(h.u.listTop) + 1.5*row // the second row: Archive
+
+	h.click(40, y, 1)
+	if h.u.pane.sel != 1 || h.u.folder.ID != h.archive.ID {
+		t.Fatalf("a click didn't preview Archive: sel %d, folder %q", h.u.pane.sel, h.u.folder.Name)
+	}
+	if !h.u.pane.open || len(h.daemon.calls().synced) != 0 {
+		t.Errorf("a single click should only preview: open %v, synced %v", h.u.pane.open, h.daemon.calls().synced)
+	}
+
+	h.click(40, y, 2)
+	if h.u.pane.open || h.u.folder.ID != h.archive.ID {
+		t.Errorf("a double click didn't choose Archive: open %v, folder %q", h.u.pane.open, h.u.folder.Name)
+	}
+	h.eventually("Archive synced", func() bool { return slices.Equal(h.daemon.calls().synced, []int64{h.archive.ID}) })
+
+	// Back in INBOX with the pane gone, the message list takes clicks too.
+	h.u.switchFolder(h.inbox)
+	h.eventually("pane closed", func() bool {
+		return h.u.paneShown(layout.Context{Ops: new(op.Ops), Source: h.r.Source()}) == 0
+	})
+	h.click(300, y, 1)
+	if h.selectedKey() != "x" {
+		t.Errorf("clicking the second row of the list selected %q", h.selectedKey())
+	}
 }
