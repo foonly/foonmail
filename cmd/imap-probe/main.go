@@ -7,9 +7,8 @@
 //     (such as reading a message on the phone) and expunges
 //   - after a disconnect or resume from sleep, what changed in between
 //
-// The password is read from the Secret Service keyring. Store it with:
-//
-//	secret-tool store --label='foonmail: USER on HOST' service foonmail/HOST username USER
+// The server and login come from the foonmail config (-account picks one);
+// the password from the Secret Service keyring, as for foonmaild.
 package main
 
 import (
@@ -19,48 +18,51 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/zalando/go-keyring"
+
+	"foonmail/internal/config"
 )
 
 func main() {
-	addr := flag.String("addr", "mail.uplink.fi:993", "IMAP server, host:port (implicit TLS)")
-	user := flag.String("user", "", "login name (required)")
+	defaultPath, _ := config.Path()
+	configPath := flag.String("config", defaultPath, "configuration file")
+	accountName := flag.String("account", "", "account to probe (default: the first)")
 	mailbox := flag.String("mailbox", "INBOX", "mailbox to watch")
 	check := flag.Duration("check", 5*time.Minute, "how often to verify the connection is alive")
 	debug := flag.Bool("debug", false, "print the IMAP protocol to stderr, with credentials redacted")
 	flag.Parse()
 
 	out := log.New(os.Stdout, "", log.Ltime)
-	if *user == "" {
-		fmt.Fprintln(os.Stderr, "imap-probe: -user is required")
-		flag.Usage()
-		os.Exit(2)
-	}
-	host, _, err := net.SplitHostPort(*addr)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
-		out.Fatalf("bad -addr %q: %v", *addr, err)
+		out.Fatal(err)
 	}
-
-	service := "foonmail/" + host
-	pass, err := keyring.Get(service, *user)
+	acct := &cfg.Accounts[0]
+	if *accountName != "" {
+		if acct, err = cfg.Account(*accountName); err != nil {
+			out.Fatal(err)
+		}
+	}
+	addr, host := acct.IMAP.Address(), acct.IMAP.Host
+	service, user := acct.IMAP.SecretService()
+	pass, err := keyring.Get(service, user)
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "No password in the keyring for %s on %s. Store it with:\n\n"+
 				"  secret-tool store --label='foonmail: %s on %s' service %s username %s\n\n",
-				*user, host, *user, host, service, *user)
+				user, host, user, host, service, user)
 			os.Exit(1)
 		}
 		out.Fatalf("reading the keyring: %v", err)
 	}
 
 	p := &prober{
-		addr: *addr, user: *user, pass: pass, mailbox: *mailbox,
+		addr: addr, user: user, pass: pass, mailbox: *mailbox,
 		check: *check, out: out,
 	}
 	if *debug {

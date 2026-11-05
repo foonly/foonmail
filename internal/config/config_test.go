@@ -21,13 +21,13 @@ func write(t *testing.T, content string) string {
 
 const minimal = `
 [[account]]
-name = "uplink"
-email = "Niklas <Niklas@Uplink.fi>"
-aliases = ["postmaster@uplink.fi"]
+name = "home"
+email = "Kim <Me@Example.org>"
+aliases = ["postmaster@example.org"]
 
 [account.imap]
-host = "mail.uplink.fi"
-username = "niklas"
+host = "mail.example.org"
+username = "me"
 `
 
 func TestDefaults(t *testing.T) {
@@ -44,10 +44,10 @@ func TestDefaults(t *testing.T) {
 		t.Errorf("DataDir = %q", c.DataDir)
 	}
 	a := c.Accounts[0]
-	if a.IMAP.Address() != "mail.uplink.fi:993" || a.IMAP.Security != SecurityTLS {
+	if a.IMAP.Address() != "mail.example.org:993" || a.IMAP.Security != SecurityTLS {
 		t.Errorf("IMAP = %+v", a.IMAP)
 	}
-	if a.SMTP.Address() != "mail.uplink.fi:465" || a.SMTP.Username != "niklas" {
+	if a.SMTP.Address() != "mail.example.org:465" || a.SMTP.Username != "me" {
 		t.Errorf("SMTP = %+v, want IMAP host and username on 465", a.SMTP)
 	}
 	if !*a.AppendSent || !*a.NotifyDetails {
@@ -56,10 +56,10 @@ func TestDefaults(t *testing.T) {
 	if !slices.Equal(a.Folders.Watched, []string{"@sent"}) || a.Folders.PollInterval != 5*time.Minute {
 		t.Errorf("Folders = %+v", a.Folders)
 	}
-	if got := a.Addresses(); !slices.Equal(got, []string{"niklas@uplink.fi", "postmaster@uplink.fi"}) {
+	if got := a.Addresses(); !slices.Equal(got, []string{"me@example.org", "postmaster@example.org"}) {
 		t.Errorf("Addresses = %v", got)
 	}
-	if svc, user := a.IMAP.SecretService(); svc != "foonmail/mail.uplink.fi" || user != "niklas" {
+	if svc, user := a.IMAP.SecretService(); svc != "foonmail/mail.example.org" || user != "me" {
 		t.Errorf("SecretService = %q, %q", svc, user)
 	}
 }

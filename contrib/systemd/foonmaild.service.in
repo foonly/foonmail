@@ -10,7 +10,7 @@ After=graphical-session.target
 
 [Service]
 Type=dbus
-BusName=fi.uplink.Foonmail
+BusName=io.github.foonly.Foonmail
 ExecStart=@BINDIR@/foonmaild
 Restart=on-failure
 RestartSec=10

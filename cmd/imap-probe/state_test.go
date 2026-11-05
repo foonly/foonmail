@@ -66,16 +66,16 @@ func TestRedactWriter(t *testing.T) {
 	w := newRedactWriter(&out)
 	// Written in pieces, as the client does.
 	for _, chunk := range []string{
-		"T1 LOG", "IN niklas \"hunter2\"\r\n",
+		"T1 LOG", "IN kimstr \"hunter2\"\r\n",
 		"T1 OK Logged in\r\n",
-		"T2 LOGIN {6}\r\n", "niklas {7}\r\n", "hunter2\r\n",
+		"T2 LOGIN {6}\r\n", "kimstr {7}\r\n", "hunter2\r\n",
 		"T3 SELECT INBOX\r\n",
 		"T4 AUTHENTICATE PLAIN AGJvYgBodW50ZXIy\r\n",
 	} {
 		w.Write([]byte(chunk))
 	}
 	got := out.String()
-	for _, secret := range []string{"hunter2", "niklas", "AGJvYgBodW50ZXIy"} {
+	for _, secret := range []string{"hunter2", "kimstr", "AGJvYgBodW50ZXIy"} {
 		if strings.Contains(got, secret) {
 			t.Errorf("log contains %q:\n%s", secret, got)
 		}

@@ -31,7 +31,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { db.Close() })
 	f := &fixture{t: t, db: db, path: path}
-	f.account = get(db.EnsureAccount(ctx, "uplink"))
+	f.account = get(db.EnsureAccount(ctx, "home"))
 	f.inbox = get(db.EnsureFolder(ctx, f.account, "INBOX"))
 	f.archive = get(db.EnsureFolder(ctx, f.account, "Archives.2026"))
 	return f
@@ -64,7 +64,7 @@ func msg(uid uint32, msgID, subject, from string, flags ...string) NewMessage {
 			MessageID: msgID,
 			Subject:   subject,
 			From:      Address{Name: from, Addr: strings.ToLower(strings.Fields(from)[0]) + "@example.com"},
-			To:        []Address{{Name: "Niklas", Addr: "niklas@uplink.fi"}},
+			To:        []Address{{Name: "Kim", Addr: "me@example.net"}},
 			Date:      time.Date(2026, 11, 1, 0, 0, int(uid), 0, time.UTC),
 		},
 	}
@@ -89,7 +89,7 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer db.Close()
-	if id := get(db.EnsureAccount(ctx, "uplink")); id != f.account {
+	if id := get(db.EnsureAccount(ctx, "home")); id != f.account {
 		t.Errorf("account id changed across reopen: %d != %d", id, f.account)
 	}
 }
@@ -104,7 +104,7 @@ func TestOpenReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ro.Close()
-	if id := get(ro.AccountID(ctx, "uplink")); id != f.account {
+	if id := get(ro.AccountID(ctx, "home")); id != f.account {
 		t.Errorf("AccountID = %d", id)
 	}
 	if list := get(ro.List(ctx, f.inbox.ID, 10, 0)); len(list) != 1 || list[0].Subject != "Hello" {
@@ -376,7 +376,7 @@ func TestSearch(t *testing.T) {
 		{0, []string{"käsi"}, []uint32{2}},                      // ä kept distinct from a
 		{0, []string{"kasi"}, []uint32{3}},                      //
 		{0, []string{"mäkelä"}, []uint32{2}},                    // sender name
-		{0, []string{"niklas@uplink"}, []uint32{1, 2, 3, 4, 9}}, // recipients
+		{0, []string{"me@example"}, []uint32{1, 2, 3, 4, 9}}, // recipients
 		{0, []string{`"and"`}, []uint32{4}},                     // quotes are searched literally
 		{0, []string{"OR"}, []uint32{4}},                        // FTS keywords are plain words
 		{0, []string{"NEAR(x)"}, []uint32{4}},                   //

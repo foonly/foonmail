@@ -52,7 +52,7 @@ func (f *fakeOutbox) Submit(_ context.Context, account string, raw []byte) (int6
 }
 
 func (f *fakeOutbox) List(context.Context) ([]outbox.Item, error) {
-	return []outbox.Item{{ID: 1, Account: "uplink", State: outbox.Uncertain, Subject: "Kahvi?", To: "Bob",
+	return []outbox.Item{{ID: 1, Account: "home", State: outbox.Uncertain, Subject: "Kahvi?", To: "Bob",
 		Error: "no answer", Created: time.Unix(1700000000, 0)}}, nil
 }
 
@@ -67,7 +67,7 @@ func TestSendingNotifications(t *testing.T) {
 	fo := &fakeOutbox{undoErr: outbox.ErrTooLate}
 	e.h.outbox = fo
 
-	e.h.notifyOutbox(outbox.Event{Kind: outbox.Queued, ID: 7, Account: "uplink", Subject: "Kahvi?", To: "Bob"})
+	e.h.notifyOutbox(outbox.Event{Kind: outbox.Queued, ID: 7, Account: "home", Subject: "Kahvi?", To: "Bob"})
 	e.eventually("sending notification", func() bool { return len(e.notes.all()) == 1 })
 	q := e.notes.all()[0]
 	if q.Summary != "Sending to Bob" || q.Body != "Kahvi?" || len(q.Actions) != 1 || q.Actions[0].Key != "undo" {
@@ -86,7 +86,7 @@ func TestSendingNotifications(t *testing.T) {
 	}
 
 	// Sent replaces it too, and is short-lived.
-	e.h.notifyOutbox(outbox.Event{Kind: outbox.SentOK, ID: 7, Account: "uplink", Subject: "Kahvi?", To: "Bob"})
+	e.h.notifyOutbox(outbox.Event{Kind: outbox.SentOK, ID: 7, Account: "home", Subject: "Kahvi?", To: "Bob"})
 	e.eventually("sent notification", func() bool { return len(e.notes.all()) == 3 })
 	s := e.notes.all()[2]
 	if s.Summary != "Sent to Bob" || s.ReplacesID != 1 || s.Timeout <= 0 || len(s.Actions) != 0 {
@@ -138,12 +138,12 @@ func TestServiceSending(t *testing.T) {
 	fo := e.outbox
 	ctx := callCtx(t)
 
-	id, err := e.client.Send(ctx, "uplink", []byte("To: bob@example.com\r\n\r\nHi\r\n"))
+	id, err := e.client.Send(ctx, "home", []byte("To: bob@example.com\r\n\r\nHi\r\n"))
 	if err != nil || id != 1 {
 		t.Errorf("Send = %d, %v", id, err)
 	}
 	items, err := e.client.Outbox(ctx)
-	if err != nil || len(items) != 1 || items[0] != (rpc.OutboxItem{ID: 1, Account: "uplink", State: "uncertain",
+	if err != nil || len(items) != 1 || items[0] != (rpc.OutboxItem{ID: 1, Account: "home", State: "uncertain",
 		Subject: "Kahvi?", To: "Bob", Error: "no answer", Created: 1700000000}) {
 		t.Errorf("Outbox = %+v, %v", items, err)
 	}
@@ -158,7 +158,7 @@ func TestServiceSending(t *testing.T) {
 	if err := e.client.Undo(ctx, 1); !errors.Is(err, rpc.ErrTooLate) {
 		t.Errorf("Undo too late: err = %v", err)
 	}
-	if _, err := e.client.Send(ctx, "uplink", []byte("x")); !errors.Is(err, rpc.ErrTooLarge) || !strings.Contains(err.Error(), "limit is 5 MB") {
+	if _, err := e.client.Send(ctx, "home", []byte("x")); !errors.Is(err, rpc.ErrTooLarge) || !strings.Contains(err.Error(), "limit is 5 MB") {
 		t.Errorf("Send too large: err = %v", err)
 	}
 }

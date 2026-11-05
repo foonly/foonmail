@@ -65,7 +65,7 @@ func TestRegisterPropertiesAndActivate(t *testing.T) {
 	w := startWatcher(t, bus)
 	activated := make(chan struct{}, 1)
 	tr, err := New(bus.Conn(), "foonmail",
-		State{Status: Active, IconName: "mail-read", Tooltip: "foonmail\nuplink: 404 unread"},
+		State{Status: Active, IconName: "mail-read", Tooltip: "foonmail\nhome: 404 unread"},
 		func() { activated <- struct{}{} }, quiet)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestRegisterPropertiesAndActivate(t *testing.T) {
 		t.Errorf("Status %v, IconName %v, Id %v", get("Status"), get("IconName"), get("Id"))
 	}
 	tip := get("ToolTip").([]any)
-	if tip[2] != "foonmail" || tip[3] != "uplink: 404 unread" {
+	if tip[2] != "foonmail" || tip[3] != "home: 404 unread" {
 		t.Errorf("ToolTip = %v", tip)
 	}
 

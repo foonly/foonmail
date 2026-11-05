@@ -13,7 +13,7 @@ func entry(id int64, folder int64, uid uint32, msgID, inReplyTo, from, subject s
 		Summary: cache.Summary{
 			ID: id, FolderID: folder, UID: uid, Subject: subject, Flags: flags,
 			From: cache.Address{Name: from, Addr: map[string]string{"Bob Example": "bob@example.com",
-				"Liisa Mäkelä": "liisa@example.com", "Me": "niklas@uplink.fi"}[from]},
+				"Liisa Mäkelä": "liisa@example.com", "Me": "me@example.org"}[from]},
 			Date: time.Date(2026, 11, 4, hour, 0, 0, 0, time.UTC),
 		},
 		MessageID: msgID, InReplyTo: inReplyTo,
@@ -32,7 +32,7 @@ func TestBuildConversations(t *testing.T) {
 		entry(6, inbox, 13, "self", "", "Me", "Note to self", 7),
 		entry(6, sent, 52, "self", "", "Me", "Note to self", 7, `\Seen`),
 	}
-	cs := buildConversations(entries, inbox, []string{"niklas@uplink.fi"})
+	cs := buildConversations(entries, inbox, []string{"me@example.org"})
 	if len(cs) != 3 {
 		t.Fatalf("%d conversations, want 3 (the Sent-only one is left out): %+v", len(cs), cs)
 	}
@@ -71,7 +71,7 @@ func TestDeliveredCopyOfOwnMailIsOneMessage(t *testing.T) {
 		entry(14, inbox, 22, "r", "q", "Me", "Re: Plan", 11),
 	}
 	for _, folder := range []int64{inbox, sent} {
-		cs := buildConversations(entries, folder, []string{"niklas@uplink.fi"})
+		cs := buildConversations(entries, folder, []string{"me@example.org"})
 		if len(cs) != 2 {
 			t.Fatalf("folder %d: %d conversations, want 2", folder, len(cs))
 		}

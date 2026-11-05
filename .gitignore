@@ -8,3 +8,6 @@
 /render-sample
 /bin/
 /foonmailctl
+
+# Values for tests against your own mail; see local.test.env.example.
+/local.test.env

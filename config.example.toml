@@ -14,7 +14,7 @@
 # data_dir = "~/.local/share/foonmail"
 
 [[account]]
-name = "uplink"                      # short id: a-z, 0-9, _ and -
+name = "home"                        # short id: a-z, 0-9, _ and -
 email = "you@example.com"            # primary address
 display_name = "Your Name"
 aliases = ["postmaster@example.com"] # other addresses that are you

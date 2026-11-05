@@ -37,7 +37,7 @@ func TestNewMessage(t *testing.T) {
 	if !h.r.Source().Focused(&h.u.comp.to) {
 		t.Error("a new message should start in To")
 	}
-	if got := h.u.comp.from.Text(); got != "Niklas <niklas@uplink.fi>" {
+	if got := h.u.comp.from.Text(); got != "Kim <me@example.org>" {
 		t.Errorf("From = %q", got)
 	}
 	h.u.comp.to.SetText("bob@example.com")
@@ -175,7 +175,7 @@ func (h *harness) addDraft() cache.Folder {
 	}
 	if err := h.db.AddMessages(ctx, drafts.ID, []cache.NewMessage{{UID: 5, Flags: []string{`\Draft`, `\Seen`},
 		Size: int64(len(raw)), Envelope: cache.Envelope{MessageID: "draft1", Subject: "Re: Kahvi?",
-			From: cache.Address{Addr: "niklas@uplink.fi"}, Date: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)}}}); err != nil {
+			From: cache.Address{Addr: "me@example.org"}, Date: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)}}}); err != nil {
 		h.t.Fatal(err)
 	}
 	id, _ := h.db.Location(ctx, drafts.ID, 5)

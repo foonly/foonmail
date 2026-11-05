@@ -34,9 +34,9 @@ import (
 )
 
 const (
-	BusName   = "fi.uplink.Foonmail"
-	Path      = dbus.ObjectPath("/fi/uplink/Foonmail")
-	Interface = "fi.uplink.Foonmail1"
+	BusName   = "io.github.foonly.Foonmail"
+	Path      = dbus.ObjectPath("/io/github/foonly/Foonmail")
+	Interface = "io.github.foonly.Foonmail1"
 
 	SignalFolderChanged = Interface + ".FolderChanged"
 	SignalStatusChanged = Interface + ".StatusChanged"

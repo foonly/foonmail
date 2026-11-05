@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,11 +12,13 @@ import (
 )
 
 // TestRealCacheGrouping times loading and grouping a real cache's INBOX and
-// Sent. It runs only when FOONMAIL_TEST_CACHE points at a mail.db.
+// Sent. It runs only when FOONMAIL_TEST_CACHE points at a mail.db, set in
+// the environment or in the gitignored local.test.env.
 func TestRealCacheGrouping(t *testing.T) {
+	loadLocalTestEnv(t)
 	path := os.Getenv("FOONMAIL_TEST_CACHE")
 	if path == "" {
-		t.Skip("set FOONMAIL_TEST_CACHE to a mail.db")
+		t.Skip("set FOONMAIL_TEST_CACHE in local.test.env (see local.test.env.example)")
 	}
 	db, err := cache.OpenReadOnly(path)
 	if err != nil {
@@ -66,4 +69,41 @@ func TestRealCacheGrouping(t *testing.T) {
 	}
 	t.Logf("%d messages loaded in %s, grouped into %d conversations (%d with several messages) in %s",
 		len(entries), loaded.Round(time.Millisecond), len(convs), multi, grouped.Round(time.Millisecond))
+}
+
+// loadLocalTestEnv sets variables from local.test.env in the repository
+// root, unless they are already set. The file is gitignored: it holds
+// what tests against your own mail need, such as your account name.
+func loadLocalTestEnv(t *testing.T) {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return
+		}
+		dir = parent
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "local.test.env"))
+	if err != nil {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.HasPrefix(line, "#") || os.Getenv(key) != "" {
+			continue
+		}
+		if strings.HasPrefix(value, "~/") {
+			value = filepath.Join(home, value[2:])
+		}
+		t.Setenv(strings.TrimSpace(key), strings.TrimSpace(value))
+	}
 }

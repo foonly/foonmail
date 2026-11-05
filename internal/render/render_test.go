@@ -25,7 +25,7 @@ func mustRender(t *testing.T, msg []byte, opts Options) *Message {
 func TestPlainMessageAndHeaders(t *testing.T) {
 	m := mustRender(t, raw([]string{
 		"From: =?utf-8?q?Liisa_M=C3=A4kel=C3=A4?= <liisa@example.com>",
-		"To: Niklas <niklas@uplink.fi>, bob@example.com",
+		"To: Kim <me@example.org>, bob@example.com",
 		"Subject: =?utf-8?b?S2FodmkgdG9yc3RhaW5hPw==?=",
 		"Date: Wed, 04 Nov 2026 12:00:00 +0200",
 		"Content-Type: text/plain; charset=utf-8",
@@ -148,9 +148,9 @@ func TestHTMLConversion(t *testing.T) {
 }
 
 func TestPlainPreferredUnlessStub(t *testing.T) {
-	good := "Hi Niklas,\n\nThe meeting moved to Thursday. Let me know if that doesn't work for you.\n\nBob"
-	m := mustRender(t, multipartAlt(good, "<p>Hi Niklas, the meeting moved.</p>"), Options{})
-	if m.Source != SourcePlain || !strings.HasPrefix(m.Text, "Hi Niklas,") {
+	good := "Hi Kim,\n\nThe meeting moved to Thursday. Let me know if that doesn't work for you.\n\nBob"
+	m := mustRender(t, multipartAlt(good, "<p>Hi Kim, the meeting moved.</p>"), Options{})
+	if m.Source != SourcePlain || !strings.HasPrefix(m.Text, "Hi Kim,") {
 		t.Errorf("a real text part should win: %s %q", m.Source, m.Text)
 	}
 	if m := mustRender(t, multipartAlt(good, "<p>Hi</p>"), Options{PreferHTML: true}); m.Source != SourceHTML {
@@ -233,7 +233,7 @@ func TestInlineAnswersAreNotTrailing(t *testing.T) {
 
 func TestOutlookPlainText(t *testing.T) {
 	text := "Thanks!\n\n________________________________\nFrom: Bob Example <bob@example.com>\nSent: Tuesday, November 3, 2026 14:02\n" +
-		"To: Niklas\nSubject: Report\n\nPlease send it."
+		"To: Kim\nSubject: Report\n\nPlease send it."
 	qs := findQuotes(text)
 	if len(qs) != 1 || !qs[0].Trailing || qs[0].Who != "Bob Example" || qs[0].End != len(text) {
 		t.Errorf("quotes = %+v", qs)

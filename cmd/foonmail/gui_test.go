@@ -138,7 +138,7 @@ func (d *fakeDaemon) Status(context.Context) ([]rpc.AccountStatus, error) {
 	if d.err != nil {
 		return nil, d.err
 	}
-	return []rpc.AccountStatus{{Name: "uplink", Online: true}}, nil
+	return []rpc.AccountStatus{{Name: "home", Online: true}}, nil
 }
 
 func (d *fakeDaemon) setErr(err error) {
@@ -195,7 +195,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { db.Close() })
 	ctx := context.Background()
-	acct, _ := db.EnsureAccount(ctx, "uplink")
+	acct, _ := db.EnsureAccount(ctx, "home")
 	h := &harness{t: t, db: db, ids: map[string]int64{}}
 	h.inbox, _ = db.EnsureFolder(ctx, acct, "INBOX")
 	h.sent, _ = db.EnsureFolder(ctx, acct, "Sent")
@@ -218,7 +218,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	msgs := []m{
 		{h.inbox, 1, "a", "", "Bob", "bob@example.com", "Kahvi?", 9, true, `<p>See <a href="https://one.example/">one</a>.</p>`},
-		{h.sent, 7, "b", "a", "Me", "niklas@uplink.fi", "Re: Kahvi?", 10, true, "Sure.\n\nOn Tue, Bob wrote:\n> Kahvi?\n"},
+		{h.sent, 7, "b", "a", "Me", "me@example.org", "Re: Kahvi?", 10, true, "Sure.\n\nOn Tue, Bob wrote:\n> Kahvi?\n"},
 		{h.inbox, 2, "c", "b", "Liisa", "liisa@example.com", "Re: Re: Kahvi?", 11, false, `<p>Me too, <a href="https://two.example/">two</a>.</p>`},
 		{h.inbox, 3, "x", "", "Bob", "bob@example.com", "Invoice", 8, true, "Pay it."},
 	}
@@ -242,7 +242,7 @@ func newHarness(t *testing.T) *harness {
 	h.archive, _ = db.FolderByID(ctx, h.archive.ID)
 
 	u := newUI(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	u.account = &config.Account{Name: "uplink", Email: "niklas@uplink.fi", DisplayName: "Niklas"}
+	u.account = &config.Account{Name: "home", Email: "me@example.org", DisplayName: "Kim"}
 	u.own = u.account.Addresses()
 	u.accountID, u.folder, u.daemon = acct, h.inbox, d
 	u.sent = &h.sent

@@ -13,15 +13,15 @@ import (
 )
 
 func acct() *config.Account {
-	return &config.Account{Name: "uplink", Email: "niklas@uplink.fi", DisplayName: "Niklas Schönberg",
-		Aliases: []string{"postmaster@uplink.fi"}}
+	return &config.Account{Name: "home", Email: "me@example.org", DisplayName: "Kim Ström",
+		Aliases: []string{"postmaster@example.org"}}
 }
 
 var (
 	bob   = render.Address{Name: "Bob", Addr: "bob@example.com"}
 	liisa = render.Address{Name: "Mäkelä, Liisa", Addr: "liisa@example.com"}
-	me    = render.Address{Name: "Niklas", Addr: "niklas@uplink.fi"}
-	alias = render.Address{Addr: "postmaster@uplink.fi"}
+	me    = render.Address{Name: "Kim", Addr: "me@example.org"}
+	alias = render.Address{Addr: "postmaster@example.org"}
 )
 
 func original() *render.Message {
@@ -39,7 +39,7 @@ func TestReplySender(t *testing.T) {
 	if d.To != "Bob <bob@example.com>" || d.Cc != "" {
 		t.Errorf("To %q, Cc %q", d.To, d.Cc)
 	}
-	if d.From != "Niklas Schönberg <niklas@uplink.fi>" {
+	if d.From != "Kim Ström <me@example.org>" {
 		t.Errorf("From = %q", d.From)
 	}
 	if d.Subject != "Re: Kahvi?" || d.InReplyTo != "c@x" || !slices.Equal(d.References, []string{"a@x", "b@x", "c@x"}) {
@@ -70,7 +70,7 @@ func TestReplyToHeaderAndAlias(t *testing.T) {
 	if d.To != "list@example.com" {
 		t.Errorf("Reply-To not used: %q", d.To)
 	}
-	if d.From != "Niklas Schönberg <postmaster@uplink.fi>" {
+	if d.From != "Kim Ström <postmaster@example.org>" {
 		t.Errorf("mail to an alias should be answered from it: %q", d.From)
 	}
 }
@@ -120,7 +120,7 @@ func TestBuildRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.From[0] != (render.Address{Name: "Niklas Schönberg", Addr: "niklas@uplink.fi"}) {
+	if m.From[0] != (render.Address{Name: "Kim Ström", Addr: "me@example.org"}) {
 		t.Errorf("From = %+v", m.From)
 	}
 	if len(m.Cc) != 2 || m.Cc[0].Name != "Mäkelä, Liisa" || m.Subject != "Re: Kahvi?" {
@@ -155,7 +155,7 @@ func TestBuildErrors(t *testing.T) {
 
 func TestForward(t *testing.T) {
 	pdf := "%PDF-1.4 fake"
-	raw := "From: Bob <bob@example.com>\r\nTo: niklas@uplink.fi\r\nSubject: Re: Report\r\nMessage-ID: <r@x>\r\n" +
+	raw := "From: Bob <bob@example.com>\r\nTo: me@example.org\r\nSubject: Re: Report\r\nMessage-ID: <r@x>\r\n" +
 		"Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n" +
 		"--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=report.pdf\r\n\r\n" + pdf + "\r\n--b--\r\n"
 	m, err := render.Render([]byte(raw), render.Options{})

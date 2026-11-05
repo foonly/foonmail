@@ -72,7 +72,7 @@ type hubEnv struct {
 func newHubEnv(t *testing.T, details bool, accounts ...string) *hubEnv {
 	t.Helper()
 	if len(accounts) == 0 {
-		accounts = []string{"uplink"}
+		accounts = []string{"home"}
 	}
 	db, err := cache.Open(filepath.Join(t.TempDir(), "mail.db"))
 	if err != nil {
@@ -83,7 +83,7 @@ func newHubEnv(t *testing.T, details bool, accounts ...string) *hubEnv {
 	for _, name := range accounts {
 		d := details
 		cfg.Accounts = append(cfg.Accounts, config.Account{
-			Name: name, Email: "niklas@uplink.fi", Aliases: []string{"postmaster@uplink.fi"}, NotifyDetails: &d,
+			Name: name, Email: "me@example.org", Aliases: []string{"postmaster@example.org"}, NotifyDetails: &d,
 		})
 	}
 	e := &hubEnv{t: t, db: db, notes: &fakeNotifier{caps: []string{"actions"}}, tray: &fakeTray{}}
@@ -122,14 +122,14 @@ func (e *hubEnv) arrive(uid uint32, from, subject string, seen bool) {
 	if err := e.db.AddMessages(context.Background(), e.inbox, []cache.NewMessage{{UID: uid, Flags: flags, Envelope: env}}); err != nil {
 		e.t.Fatal(err)
 	}
-	e.h.notify(imapsync.NewMail{Account: "uplink", UID: uid, Envelope: env, Seen: seen})
+	e.h.notify(imapsync.NewMail{Account: "home", UID: uid, Envelope: env, Seen: seen})
 }
 
 func TestSingleMailNotifiesAndLightsTray(t *testing.T) {
 	e := newHubEnv(t, true)
-	e.h.notify(imapsync.ConnectionChanged{Account: "uplink", Online: true})
-	e.h.notify(imapsync.UnreadChanged{Account: "uplink", Unread: 404})
-	e.eventually("tray online", func() bool { return strings.Contains(e.tray.state().Tooltip, "uplink: 404 unread") })
+	e.h.notify(imapsync.ConnectionChanged{Account: "home", Online: true})
+	e.h.notify(imapsync.UnreadChanged{Account: "home", Unread: 404})
+	e.eventually("tray online", func() bool { return strings.Contains(e.tray.state().Tooltip, "home: 404 unread") })
 	if s := e.tray.state(); s.Status != tray.Active || s.IconName != "mail-read" {
 		t.Errorf("idle tray = %+v; 404 old unread messages are not new mail", s)
 	}
@@ -188,7 +188,7 @@ func TestBurstBecomesSummaryUpdatedInPlace(t *testing.T) {
 func TestSkippedMailIsNotNew(t *testing.T) {
 	e := newHubEnv(t, true)
 	e.arrive(1, "bob@example.com", "Read on phone", true)
-	e.arrive(2, "Postmaster@Uplink.fi", "From me", false)
+	e.arrive(2, "Postmaster@Example.ORG", "From me", false)
 	time.Sleep(60 * time.Millisecond)
 	if n := e.notes.all(); len(n) != 0 {
 		t.Errorf("notified %d times; read mail and own mail must not notify", len(n))
@@ -208,14 +208,14 @@ func TestReadElsewhereStopsBeingNew(t *testing.T) {
 	if err := e.db.SetFlags(context.Background(), e.inbox, []cache.FlagUpdate{{UID: 1, Flags: []string{`\Seen`}}}); err != nil {
 		t.Fatal(err)
 	}
-	e.h.notify(imapsync.UnreadChanged{Account: "uplink", Unread: 1})
+	e.h.notify(imapsync.UnreadChanged{Account: "home", Unread: 1})
 	e.eventually("one new", func() bool { return strings.Contains(e.tray.state().Tooltip, "1 new message") })
 
 	// Deleted on the phone.
 	if err := e.db.RemoveUIDs(context.Background(), e.inbox, []uint32{2}); err != nil {
 		t.Fatal(err)
 	}
-	e.h.notify(imapsync.UnreadChanged{Account: "uplink", Unread: 0})
+	e.h.notify(imapsync.UnreadChanged{Account: "home", Unread: 0})
 	e.eventually("nothing new", func() bool { return e.tray.state().Status == tray.Active })
 }
 
@@ -239,10 +239,10 @@ func TestNoDetails(t *testing.T) {
 
 func TestOfflineInTooltip(t *testing.T) {
 	e := newHubEnv(t, true)
-	e.eventually("connecting", func() bool { return strings.Contains(e.tray.state().Tooltip, "uplink: connecting…") })
-	e.h.notify(imapsync.ConnectionChanged{Account: "uplink", Online: false, Err: io.ErrUnexpectedEOF})
+	e.eventually("connecting", func() bool { return strings.Contains(e.tray.state().Tooltip, "home: connecting…") })
+	e.h.notify(imapsync.ConnectionChanged{Account: "home", Online: false, Err: io.ErrUnexpectedEOF})
 	e.eventually("offline", func() bool {
-		return strings.Contains(e.tray.state().Tooltip, "uplink: offline (unexpected EOF)")
+		return strings.Contains(e.tray.state().Tooltip, "home: offline (unexpected EOF)")
 	})
 }
 

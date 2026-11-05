@@ -54,7 +54,7 @@ type session struct {
 func (ss *session) AuthMechanisms() []string { return []string{sasl.Plain} }
 func (ss *session) Auth(string) (sasl.Server, error) {
 	return sasl.NewPlainServer(func(_, user, pass string) error {
-		if user != "niklas" || pass != "secret" {
+		if user != "me" || pass != "secret" {
 			return errors.New("bad login")
 		}
 		return nil
@@ -168,9 +168,9 @@ type env struct {
 func account() config.Account {
 	yes := true
 	return config.Account{
-		Name: "uplink", Email: "niklas@uplink.fi", DisplayName: "Niklas", Aliases: []string{"postmaster@uplink.fi"},
+		Name: "home", Email: "me@example.org", DisplayName: "Kim", Aliases: []string{"postmaster@example.org"},
 		AppendSent: &yes,
-		SMTP:       config.Server{Host: "127.0.0.1", Username: "niklas"},
+		SMTP:       config.Server{Host: "127.0.0.1", Username: "me"},
 	}
 }
 
@@ -256,12 +256,12 @@ func (e *env) state(id int64) State {
 	return it.State
 }
 
-const msg = "From: Niklas <niklas@uplink.fi>\nTo: Bob <bob@example.com>\nCc: liisa@example.com\n" +
+const msg = "From: Kim <me@example.org>\nTo: Bob <bob@example.com>\nCc: liisa@example.com\n" +
 	"Bcc: secret@example.com\nSubject: Kahvi?\n\nHei!\n"
 
 func (e *env) submit(raw string) int64 {
 	e.t.Helper()
-	id, err := e.ob.Submit(context.Background(), "uplink", []byte(raw))
+	id, err := e.ob.Submit(context.Background(), "home", []byte(raw))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestSendAfterUndoWindow(t *testing.T) {
 		t.Fatalf("server received %d messages", len(got))
 	}
 	r := got[0]
-	if r.from != "niklas@uplink.fi" || strings.Join(r.rcpts, ",") != "bob@example.com,liisa@example.com,secret@example.com" {
+	if r.from != "me@example.org" || strings.Join(r.rcpts, ",") != "bob@example.com,liisa@example.com,secret@example.com" {
 		t.Errorf("envelope: from %q, rcpts %v", r.from, r.rcpts)
 	}
 	if strings.Contains(r.data, "Bcc") || strings.Contains(r.data, "secret@") {
@@ -411,10 +411,10 @@ func TestSizeLimit(t *testing.T) {
 	id := e.submit(big)
 	e.eventually("failed as too large", func() bool { return e.hasEvent(FailedSend, id) })
 	// The limit is now known, so the next big message is refused at once.
-	if _, err := e.ob.Submit(context.Background(), "uplink", []byte(big)); !errors.Is(err, ErrTooLarge) {
+	if _, err := e.ob.Submit(context.Background(), "home", []byte(big)); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("second large message: err = %v", err)
 	}
-	if _, err := e.ob.Submit(context.Background(), "uplink", []byte(msg)); err != nil {
+	if _, err := e.ob.Submit(context.Background(), "home", []byte(msg)); err != nil {
 		t.Errorf("small message refused: %v", err)
 	}
 }
@@ -442,22 +442,22 @@ func TestPrepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(p.wire, []byte("From: \"Niklas\" <niklas@uplink.fi>")) && !bytes.Contains(p.wire, []byte("From: Niklas <niklas@uplink.fi>")) {
+	if !bytes.Contains(p.wire, []byte("From: \"Kim\" <me@example.org>")) && !bytes.Contains(p.wire, []byte("From: Kim <me@example.org>")) {
 		t.Errorf("From not filled in:\n%s", p.wire)
 	}
-	if !strings.HasSuffix(p.messageID, "@uplink.fi") || p.from != "niklas@uplink.fi" || p.to != "bob@example.com" {
+	if !strings.HasSuffix(p.messageID, "@example.org") || p.from != "me@example.org" || p.to != "bob@example.com" {
 		t.Errorf("prepared = %+v", p)
 	}
 
-	p, _ = prepare([]byte("From: postmaster@uplink.fi\nTo: bob@example.com\n\nx"), &acct, now)
-	if p.from != "postmaster@uplink.fi" {
+	p, _ = prepare([]byte("From: postmaster@example.org\nTo: bob@example.com\n\nx"), &acct, now)
+	if p.from != "postmaster@example.org" {
 		t.Errorf("alias as envelope sender: %q", p.from)
 	}
 	p, _ = prepare([]byte("From: someone@else.example\nTo: bob@example.com\n\nx"), &acct, now)
-	if p.from != "niklas@uplink.fi" {
+	if p.from != "me@example.org" {
 		t.Errorf("foreign From must not be the envelope sender: %q", p.from)
 	}
-	if _, err := prepare([]byte("From: niklas@uplink.fi\nSubject: nobody\n\nx"), &acct, now); err == nil {
+	if _, err := prepare([]byte("From: me@example.org\nSubject: nobody\n\nx"), &acct, now); err == nil {
 		t.Error("a message without recipients was accepted")
 	}
 	p, _ = prepare([]byte("To: bob@example.com\nMessage-ID: <kept@x>\n\nx"), &acct, now)

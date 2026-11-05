@@ -93,7 +93,7 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 	}
 	t.Cleanup(func() { db.Close() })
 	details := true
-	cfg := &config.Config{Accounts: []config.Account{{Name: "uplink", Email: "me@uplink.fi", NotifyDetails: &details}}}
+	cfg := &config.Config{Accounts: []config.Account{{Name: "home", Email: "me@example.org", NotifyDetails: &details}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -102,7 +102,7 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 		t.Fatal(err)
 	}
 	h.delay = 10 * time.Millisecond
-	acct, _ := db.EnsureAccount(ctx, "uplink")
+	acct, _ := db.EnsureAccount(ctx, "home")
 	b := &fakeBackend{}
 	fo := &fakeOutbox{}
 	svc, err := exportService(bus.Conn(), db, map[int64]backend{acct: b}, fo, h, log)
@@ -112,7 +112,7 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 	h.signals = svc
 	go h.run(ctx)
 	return &serviceEnv{t: t, client: rpc.NewClient(bus.Conn()), backend: b, outbox: fo, hub: h,
-		inbox: h.accounts["uplink"].inbox, bus: bus}
+		inbox: h.accounts["home"].inbox, bus: bus}
 }
 
 func callCtx(t *testing.T) context.Context {
@@ -177,15 +177,15 @@ func TestServiceStatusAndSignals(t *testing.T) {
 		}
 	}
 
-	e.hub.notify(imapsync.ConnectionChanged{Account: "uplink", Online: true})
-	e.hub.notify(imapsync.UnreadChanged{Account: "uplink", Unread: 404})
+	e.hub.notify(imapsync.ConnectionChanged{Account: "home", Online: true})
+	e.hub.notify(imapsync.UnreadChanged{Account: "home", Unread: 404})
 	waitFor("StatusChanged", func(ev rpc.Event) bool { _, ok := ev.(rpc.StatusChanged); return ok })
 	st, err := e.client.Status(ctx)
-	if err != nil || len(st) != 1 || st[0] != (rpc.AccountStatus{Name: "uplink", Online: true, Unread: 404}) {
+	if err != nil || len(st) != 1 || st[0] != (rpc.AccountStatus{Name: "home", Online: true, Unread: 404}) {
 		t.Fatalf("Status = %+v, %v", st, err)
 	}
 
-	e.hub.notify(imapsync.NewMail{Account: "uplink", UID: 5, Envelope: cache.Envelope{From: cache.Address{Addr: "bob@example.com"}}})
+	e.hub.notify(imapsync.NewMail{Account: "home", UID: 5, Envelope: cache.Envelope{From: cache.Address{Addr: "bob@example.com"}}})
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		st, _ = e.client.Status(ctx)
@@ -212,7 +212,7 @@ func TestServiceStatusAndSignals(t *testing.T) {
 		t.Errorf("Acknowledge didn't clear new mail: %+v", st)
 	}
 
-	e.hub.notify(imapsync.FolderChanged{Account: "uplink", FolderID: e.inbox})
+	e.hub.notify(imapsync.FolderChanged{Account: "home", FolderID: e.inbox})
 	waitFor("FolderChanged", func(ev rpc.Event) bool {
 		fc, ok := ev.(rpc.FolderChanged)
 		return ok && fc.FolderID == e.inbox
@@ -235,7 +235,7 @@ func TestServiceNotRunningAndSecondDaemon(t *testing.T) {
 func TestServiceDrafts(t *testing.T) {
 	e := newServiceEnv(t)
 	ctx := callCtx(t)
-	if err := e.client.SaveDraft(ctx, "uplink", []byte("To: bob@example.com\r\n\r\nx")); err != nil {
+	if err := e.client.SaveDraft(ctx, "home", []byte("To: bob@example.com\r\n\r\nx")); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.client.DeleteMessages(ctx, e.inbox, []uint32{4}); err != nil {

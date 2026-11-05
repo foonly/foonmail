@@ -11,7 +11,7 @@ import (
 )
 
 func TestShouldNotify(t *testing.T) {
-	own := []string{"niklas@uplink.fi", "postmaster@uplink.fi"}
+	own := []string{"me@example.org", "postmaster@example.org"}
 	mail := func(from string, seen bool) imapsync.NewMail {
 		return imapsync.NewMail{Seen: seen, Envelope: cache.Envelope{From: cache.Address{Addr: from}}}
 	}
@@ -22,8 +22,8 @@ func TestShouldNotify(t *testing.T) {
 	}{
 		{mail("bob@example.com", false), true, ""},
 		{mail("bob@example.com", true), false, "already read"},
-		{mail("Niklas@Uplink.FI", false), false, "from you"},
-		{mail("postmaster@uplink.fi", false), false, "from you"},
+		{mail("Me@Example.ORG", false), false, "from you"},
+		{mail("postmaster@example.org", false), false, "from you"},
 	}
 	for _, c := range cases {
 		if got, reason := shouldNotify(own, c.ev); got != c.want || reason != c.reason {

@@ -13,9 +13,9 @@ import (
 //	Show()                          raise the window
 //	ShowMessage(folder x, uid u)    open the conversation with that message
 const (
-	GUIBusName   = "fi.uplink.Foonmail.GUI"
-	GUIPath      = dbus.ObjectPath("/fi/uplink/Foonmail/GUI")
-	GUIInterface = "fi.uplink.Foonmail.GUI1"
+	GUIBusName   = "io.github.foonly.Foonmail.GUI"
+	GUIPath      = dbus.ObjectPath("/io/github/foonly/Foonmail/GUI")
+	GUIInterface = "io.github.foonly.Foonmail.GUI1"
 )
 
 // GUIClient calls the GUI. Calls start it through D-Bus activation if it

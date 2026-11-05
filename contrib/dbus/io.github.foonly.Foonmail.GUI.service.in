@@ -1,5 +1,5 @@
 # D-Bus activation for the GUI: clicking a notification while the GUI
 # isn't running starts it, then shows the message.
 [D-BUS Service]
-Name=fi.uplink.Foonmail.GUI
+Name=io.github.foonly.Foonmail.GUI
 Exec=@BINDIR@/foonmail

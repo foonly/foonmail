@@ -52,8 +52,8 @@ SYSTEMCTL ?= systemctl --user
 SUBST     = sed -e 's|@BINDIR@|$(BINDIR)|g'
 
 DESKTOP_FILE := $(DATADIR)/applications/foonmail.desktop
-DBUS_FILES   := $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.service \
-                $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.GUI.service
+DBUS_FILES   := $(DATADIR)/dbus-1/services/io.github.foonly.Foonmail.service \
+                $(DATADIR)/dbus-1/services/io.github.foonly.Foonmail.GUI.service
 UNIT_FILE    := $(UNITDIR)/foonmaild.service
 
 ## install: install the programs to ~/.local/bin, with a desktop file, D-Bus
@@ -63,8 +63,8 @@ install: build
 	@# A running binary can't be overwritten ("text file busy"), so copy then rename.
 	for c in $(COMMANDS); do install -m755 $(BIN)/$$c $(BINDIR)/.$$c.new && mv -f $(BINDIR)/.$$c.new $(BINDIR)/$$c; done
 	$(SUBST) contrib/foonmail.desktop.in > $(DESKTOP_FILE)
-	$(SUBST) contrib/dbus/fi.uplink.Foonmail.service.in > $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.service
-	$(SUBST) contrib/dbus/fi.uplink.Foonmail.GUI.service.in > $(DATADIR)/dbus-1/services/fi.uplink.Foonmail.GUI.service
+	$(SUBST) contrib/dbus/io.github.foonly.Foonmail.service.in > $(DATADIR)/dbus-1/services/io.github.foonly.Foonmail.service
+	$(SUBST) contrib/dbus/io.github.foonly.Foonmail.GUI.service.in > $(DATADIR)/dbus-1/services/io.github.foonly.Foonmail.GUI.service
 	$(SUBST) contrib/systemd/foonmaild.service.in > $(UNIT_FILE)
 	-update-desktop-database -q $(DATADIR)/applications 2>/dev/null
 	-busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig 2>/dev/null
