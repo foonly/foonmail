@@ -157,3 +157,15 @@ func TestLinksInCollapsedQuotesAreNotListed(t *testing.T) {
 		t.Errorf("expanded: shown %+v, hidden %d", shown, hidden)
 	}
 }
+
+func TestSplitNumber(t *testing.T) {
+	for line, want := range map[string][2]string{
+		"[1] www.example.fi":     {"[1] ", "www.example.fi"},
+		"#12 Ordningsregler.pdf": {"#12 ", "Ordningsregler.pdf"},
+		"nonumber":               {"", "nonumber"},
+	} {
+		if num, rest := splitNumber(line); num != want[0] || rest != want[1] {
+			t.Errorf("splitNumber(%q) = %q, %q", line, num, rest)
+		}
+	}
+}

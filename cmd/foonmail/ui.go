@@ -795,8 +795,8 @@ func (u *ui) section(title string, lines []string, numbered bool) layout.Widget 
 		}
 		for _, line := range lines {
 			num := ""
-			if i := strings.IndexByte(line, ' '); numbered && i > 0 {
-				num, line = line[:i+2], line[i+2:]
+			if numbered {
+				num, line = splitNumber(line)
 			}
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{}.Layout(gtx,

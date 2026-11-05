@@ -288,3 +288,13 @@ func spanNumber(s string) (int, bool) {
 	n, err := strconv.Atoi(s[i+1 : len(s)-1])
 	return n, err == nil
 }
+
+// splitNumber splits a numbered list line ("[3] example.org", "#1 a.pdf")
+// into the number with the space after it, and the rest.
+func splitNumber(line string) (num, rest string) {
+	i := strings.IndexByte(line, ' ')
+	if i <= 0 {
+		return "", line
+	}
+	return line[:i+1], line[i+1:]
+}

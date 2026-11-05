@@ -122,6 +122,9 @@ func (c *htmlConv) node(n *html.Node) {
 		return
 	case atom.Img:
 		if alt := strings.TrimSpace(attr(n, "alt")); alt != "" {
+			if strings.HasPrefix(strings.ToLower(alt), "cid:") {
+				alt = "image" // Outlook's stand-in names the embedded part
+			}
 			c.text("[" + alt + "]")
 		}
 		return

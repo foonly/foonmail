@@ -160,7 +160,7 @@ func Render(raw []byte, opts Options) (*Message, error) {
 	case m.HasHTML && (opts.PreferHTML || !m.HasPlain || isStub(plain, conv.text) || brokenPlain(plain)):
 		m.Text, m.Source, m.Links = conv.text, SourceHTML, conv.links
 	case m.HasPlain:
-		m.Text, m.Source = tidy(cleanEntities(plain)), SourcePlain
+		m.Text, m.Source = tidy(cidImage.ReplaceAllString(cleanEntities(plain), "[image]")), SourcePlain
 		if opts.LinkPlain {
 			m.Text, m.Links = linkifyPlain(m.Text, newNumberer(opts))
 		}
@@ -188,6 +188,10 @@ func isStub(plain, htmlText string) bool {
 	return (words < 40 && stubPhrase.MatchString(p) && htmlWords > words) ||
 		(words < 15 && htmlWords > 4*words)
 }
+
+// cidImage matches the stand-in Outlook writes in text for an embedded
+// image: "[cid:image003.png@01DB0F2E.6C1A1D70]".
+var cidImage = regexp.MustCompile(`\[cid:[^\]\s]*\]`)
 
 // htmlEntity matches an HTML character reference: "&#8199;", "&shy;".
 var htmlEntity = regexp.MustCompile(`&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,7});`)

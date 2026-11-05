@@ -178,3 +178,16 @@ func TestEntitiesDecodedWithoutHTML(t *testing.T) {
 		t.Errorf("got %q\nwant %q", m.Text, want)
 	}
 }
+
+func TestOutlookImageStandIns(t *testing.T) {
+	plain := mustRender(t, raw([]string{"Content-Type: text/plain"},
+		"Kontu\n[cid:image003.png@01DB0F2E.6C1A1D70]\nwww.example.fi"), Options{})
+	if want := "Kontu\n[image]\nwww.example.fi"; plain.Text != want {
+		t.Errorf("plain: %q", plain.Text)
+	}
+	html := mustRender(t, raw([]string{"Content-Type: text/html"},
+		`<p>Kontu <img alt="cid:image003.png@01DB0F2E" src="cid:image003.png@01DB0F2E"> <img alt="Logo"></p>`), Options{})
+	if want := "Kontu [image] [Logo]"; html.Text != want {
+		t.Errorf("html: %q", html.Text)
+	}
+}
