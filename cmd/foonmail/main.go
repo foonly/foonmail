@@ -143,6 +143,9 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 		results:     make(chan func(), 256),
 		openURL:     xdgOpen,
 		downloads:   downloadDir,
+		marks:       map[string]bool{},
+		anchor:      -1,
+		moving:      map[movingKey]bool{},
 		editorArgv:  defaultEditor,
 		focusWindow: hyprlandFocus,
 	}
@@ -156,12 +159,12 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 	if desktop.PrefersDark() {
 		u.th.Palette = material.Palette{Bg: rgb(0x1d1f21), Fg: rgb(0xe0e0e0), ContrastBg: rgb(0x6ea8fe), ContrastFg: rgb(0x1d1f21)}
 		u.muted, u.line, u.barBg, u.accent = rgb(0x9a9a9a), rgb(0x3a3d40), rgb(0x25282b), rgb(0x6ea8fe)
-		u.selBg, u.selBgBlurred = rgba(0x6ea8fe, 0x50), rgba(0x6ea8fe, 0x28)
+		u.selBg, u.selBgBlurred, u.markBg = rgba(0x6ea8fe, 0x50), rgba(0x6ea8fe, 0x28), rgba(0x6ea8fe, 0x1c)
 		u.quoteColors = []color.NRGBA{rgb(0x8fbf7f), rgb(0xd7a65f), rgb(0xb294bb)}
 	} else {
 		u.th.Palette = material.Palette{Bg: rgb(0xfafafa), Fg: rgb(0x1f1f1f), ContrastBg: rgb(0x2f6fde), ContrastFg: rgb(0xffffff)}
 		u.muted, u.line, u.barBg, u.accent = rgb(0x6b6b6b), rgb(0xd8d8d8), rgb(0xf0f0f0), rgb(0x2f6fde)
-		u.selBg, u.selBgBlurred = rgba(0x2f6fde, 0x38), rgba(0x2f6fde, 0x1c)
+		u.selBg, u.selBgBlurred, u.markBg = rgba(0x2f6fde, 0x38), rgba(0x2f6fde, 0x1c), rgba(0x2f6fde, 0x14)
 		u.quoteColors = []color.NRGBA{rgb(0x3d7a2e), rgb(0x9a6200), rgb(0x7b4f9e)}
 	}
 	return u

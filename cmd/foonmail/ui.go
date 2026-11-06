@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Enter open · c or ← folders · Tab next account · m new · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
+	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -118,14 +118,17 @@ func (u *ui) updateList(gtx layout.Context) {
 	for {
 		ev, ok := gtx.Event(
 			key.FocusFilter{Target: t},
-			key.Filter{Focus: t, Name: "J"},
-			key.Filter{Focus: t, Name: "K"},
-			key.Filter{Focus: t, Name: key.NameDownArrow},
-			key.Filter{Focus: t, Name: key.NameUpArrow},
-			key.Filter{Focus: t, Name: key.NamePageDown},
-			key.Filter{Focus: t, Name: key.NamePageUp},
-			key.Filter{Focus: t, Name: key.NameHome},
-			key.Filter{Focus: t, Name: key.NameEnd},
+			// Shift with a move marks the range moved over.
+			key.Filter{Focus: t, Name: "J", Optional: key.ModShift},
+			key.Filter{Focus: t, Name: "K", Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NameDownArrow, Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NameUpArrow, Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NamePageDown, Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NamePageUp, Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NameHome, Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NameEnd, Optional: key.ModShift},
+			key.Filter{Focus: t, Name: key.NameSpace},
+			key.Filter{Focus: t, Name: "V"},
 			key.Filter{Focus: t, Name: "=", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: "*", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: key.NameReturn},
@@ -154,6 +157,13 @@ func (u *ui) updateList(gtx layout.Context) {
 			continue
 		}
 		page := max(1, u.viewH/u.rowH-1)
+		// goTo moves the selection; with Shift it marks the rows on the way.
+		goTo := u.moveTo
+		if ke.Modifiers.Contain(key.ModShift) {
+			goTo = u.extendTo
+		} else {
+			u.anchor = -1
+		}
 		switch ke.Name {
 		case key.NameTab:
 			if ke.Modifiers.Contain(key.ModShift) {
@@ -162,17 +172,22 @@ func (u *ui) updateList(gtx layout.Context) {
 				u.switchAccount(1)
 			}
 		case "J", key.NameDownArrow:
-			u.moveTo(u.sel + 1)
+			goTo(u.sel + 1)
 		case "K", key.NameUpArrow:
-			u.moveTo(u.sel - 1)
+			goTo(u.sel - 1)
 		case key.NamePageDown:
-			u.moveTo(u.sel + page)
+			goTo(u.sel + page)
 		case key.NamePageUp:
-			u.moveTo(u.sel - page)
+			goTo(u.sel - page)
 		case key.NameHome, "=":
-			u.moveTo(0)
+			goTo(0)
 		case key.NameEnd, "*":
-			u.moveTo(len(u.view) - 1)
+			goTo(len(u.view) - 1)
+		case key.NameSpace:
+			u.toggleMark(u.sel)
+			u.moveTo(u.sel + 1)
+		case "V":
+			u.openMovePane()
 		case key.NameReturn, key.NameEnter:
 			u.openSelected()
 		case "N":
@@ -197,7 +212,11 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.searching = true
 			u.focusReq = &u.search
 		case key.NameEscape:
-			if u.searching {
+			switch {
+			case len(u.marks) > 0:
+				u.clearMarks()
+				u.notice = ""
+			case u.searching:
 				u.clearFilter()
 			}
 		case "Q":
@@ -215,8 +234,16 @@ func (u *ui) updateList(gtx layout.Context) {
 		switch ev.Kind {
 		case gesture.KindPress:
 			u.focusReq = u.listTag
-			if i := u.rowAt(ev.Position.Y); i >= 0 {
+			i := u.rowAt(ev.Position.Y)
+			switch {
+			case i < 0:
+			case ev.Modifiers.Contain(key.ModShift):
+				u.extendTo(i)
+			case ev.Modifiers.Contain(key.ModCtrl):
+				u.toggleMark(i)
 				u.sel = i
+			default:
+				u.sel, u.anchor = i, -1
 			}
 		case gesture.KindClick:
 			if ev.NumClicks >= 2 && u.rowAt(ev.Position.Y) == u.sel {
@@ -285,8 +312,13 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 		children = append(children, layout.Rigid(u.divider), layout.Rigid(u.searchBar))
 	}
 	hints := listHints
-	if u.pane.open {
+	switch {
+	case u.pane.open && len(u.pane.moving) > 0:
+		hints = "Move " + conversations(len(u.pane.moving)) + " to: j/k choose a folder · Enter or → moves · Esc cancels"
+	case u.pane.open:
 		hints = "j/k preview a folder · Enter or → open and sync it · Esc, c or ← back to " + u.pane.origin.Name
+	case u.markCount() > 0:
+		hints = fmt.Sprintf("%d marked · a archive · s junk · d trash · v move to · N read/unread · Space or Shift+j/k mark more · Esc clears", u.markCount())
 	}
 	children = append(children, layout.Rigid(u.statusBar(hints)))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -388,6 +420,10 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 	c := &u.convs[u.view[i]]
 	size := image.Pt(gtx.Constraints.Max.X, u.rowH)
 	gtx.Constraints = layout.Exact(size)
+	marked := u.marks[c.key]
+	if marked {
+		paint.FillShape(gtx.Ops, u.markBg, clip.Rect{Max: size}.Op())
+	}
 	// No selection shows while a filter is being typed, so Enter isn't
 	// forgotten: the keys still go to the filter, not the list.
 	if i == u.sel && !gtx.Focused(&u.search) {
@@ -402,6 +438,9 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 		f.Weight = font.Bold
 	}
 	flags := ""
+	if marked {
+		flags += "✓"
+	}
 	if c.unread > 0 {
 		flags += "N"
 	}
@@ -484,6 +523,7 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "O"},
 			key.Filter{Name: "W"},
 			key.Filter{Name: "B"},
+			key.Filter{Name: "V"},
 			key.Filter{Name: key.NameSpace},
 			key.Filter{Name: "-"},
 			key.Filter{Name: key.NamePageDown},
@@ -560,6 +600,8 @@ func (u *ui) updateView(gtx layout.Context) {
 			u.openInBrowser(o)
 		case name == "G":
 			u.replyFromView(kindReplyAll)
+		case name == "V":
+			u.openMovePane()
 		case name == "F":
 			u.replyFromView(kindForward)
 		case name == key.NameSpace || name == key.NamePageDown:

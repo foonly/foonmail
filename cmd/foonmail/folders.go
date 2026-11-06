@@ -41,6 +41,11 @@ type folderPane struct {
 	tag     *int
 	list    widget.List
 	click   gesture.Click
+	// moving are the conversations (by key) the pane is choosing a folder
+	// for (v); none when it is browsing. Moving lists only the shown
+	// account's folders, as the daemon moves mail within an account, and
+	// doesn't preview them.
+	moving []string
 }
 
 // folderRow is one line of the folder pane: a folder, or with several
@@ -177,7 +182,7 @@ func (u *ui) refreshPaneRows() {
 		u.loadMissing()
 	}
 	var rows []folderRow
-	if len(u.accounts) < 2 {
+	if len(u.accounts) < 2 || len(u.pane.moving) > 0 {
 		r, err := u.accountRows(u.accountID)
 		if err != nil {
 			u.notice = err.Error()
@@ -186,7 +191,7 @@ func (u *ui) refreshPaneRows() {
 		rows = r
 	}
 	for _, a := range u.accounts {
-		if len(u.accounts) < 2 {
+		if len(u.accounts) < 2 || len(u.pane.moving) > 0 {
 			break
 		}
 		if a.id != u.accountID {
@@ -242,7 +247,7 @@ func (p *folderPane) selectable(i, dir int) int {
 }
 
 func (u *ui) openPane() {
-	if u.searching {
+	if u.searching && len(u.pane.moving) == 0 {
 		u.clearFilter()
 	}
 	u.refreshPaneRows()
@@ -253,8 +258,44 @@ func (u *ui) openPane() {
 }
 
 func (u *ui) closePane() {
-	u.pane.open, u.pane.changed = false, u.now()
+	u.pane.open, u.pane.changed, u.pane.moving = false, u.now(), nil
 	u.focusReq = u.listTag
+}
+
+// openMovePane opens the folder pane to choose where the targeted
+// conversations go (v). From the conversation view it goes back to the
+// list, where the pane lives, with the open conversation as the target.
+func (u *ui) openMovePane() {
+	convs := u.targets()
+	if len(convs) == 0 {
+		return
+	}
+	if u.daemon == nil {
+		u.notice = "foonmaild isn't running: can't move mail"
+		return
+	}
+	u.pane.moving = u.pane.moving[:0]
+	for _, c := range convs {
+		u.pane.moving = append(u.pane.moving, c.key)
+	}
+	u.mode = modeList
+	u.openPane()
+}
+
+// movingConvs are the conversations the move pane was opened for that are
+// still in the list.
+func (u *ui) movingConvs() []*conversation {
+	want := map[string]bool{}
+	for _, k := range u.pane.moving {
+		want[k] = true
+	}
+	var out []*conversation
+	for i := range u.convs {
+		if want[u.convs[i].key] {
+			out = append(out, &u.convs[i])
+		}
+	}
+	return out
 }
 
 // previewFolder shows a folder's cached contents without syncing it.
@@ -273,6 +314,17 @@ func (u *ui) chooseFolder() {
 		return
 	}
 	f := p.rows[p.sel].folder
+	if len(p.moving) > 0 {
+		label := p.rows[p.sel].label
+		if f.ID == u.folder.ID {
+			u.notice = "Already in " + label
+			return
+		}
+		convs := u.movingConvs()
+		u.closePane()
+		u.moveConvs(convs, f, label, false)
+		return
+	}
 	u.closePane()
 	u.showFolder(f)
 	u.syncFolder(f)
@@ -280,7 +332,12 @@ func (u *ui) chooseFolder() {
 
 // cancelPane goes back to the folder shown before the pane opened.
 func (u *ui) cancelPane() {
+	moving := len(u.pane.moving) > 0
 	u.closePane()
+	if moving {
+		u.notice = ""
+		return // nothing was previewed
+	}
 	if u.folder.ID != u.pane.origin.ID {
 		u.showFolder(u.pane.origin)
 	}
@@ -306,6 +363,9 @@ func (u *ui) movePane(i int) {
 		p.list.Position.First, p.list.Position.Offset = top, 0
 	} else if p.sel >= p.list.Position.First+visible {
 		p.list.Position.First, p.list.Position.Offset = p.sel-visible+1, 0
+	}
+	if len(p.moving) > 0 {
+		return // choosing where to move: no preview
 	}
 	if p.rows[p.sel].other {
 		// Another account: show it, with its folders unfolded in the pane.

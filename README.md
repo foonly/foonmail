@@ -45,7 +45,8 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   opened.
 - A mail's HTML version shown in your browser when the text isn't enough,
   with scripts and remote images blocked.
-- Archive, junk and trash with one key. A folder pane lists all folders,
+- Archive, junk, trash or move to any folder with one key, for one
+  conversation or several marked ones. A folder pane lists all folders,
   with the special ones (Drafts, Sent, Archive, Junk, Trash) first.
 - A tray icon (StatusNotifierItem) that lights up for new mail, and
   notifications that open the message when clicked.
@@ -139,6 +140,8 @@ The bottom line of the window always shows the keys for what you're doing.
 | m | new message |
 | r / g / f | reply / reply all / forward |
 | a / s / d | archive / junk / trash |
+| v | move to a folder (the folder pane opens to choose one) |
+| Shift+j/k, Space | mark a range / mark one; a, s, d, v and N then act on all marked (Esc clears) |
 | N | mark read or unread |
 | / | filter |
 

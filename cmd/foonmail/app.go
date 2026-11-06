@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,9 +131,13 @@ type ui struct {
 	missing       []*config.Account  // configured accounts not in the cache yet
 	inboxUnread   map[int64]int      // unread mail in each account's INBOX, by account id
 	dataDir       string
-	undoDelay     time.Duration // how long sent mail can be taken back
-	autosavePath  string        // where the message being written is kept; "" for none
-	focusWindow   func()        // brings the window forward; hyprctl on Hyprland
+	undoDelay     time.Duration      // how long sent mail can be taken back
+	marks         map[string]bool    // marked conversations, by key
+	markBase      map[string]bool    // the marks before the current Shift range
+	anchor        int                // where the current Shift range started; -1 for none
+	moving        map[movingKey]bool // messages being moved or deleted, kept out of the list
+	autosavePath  string             // where the message being written is kept; "" for none
+	focusWindow   func()             // brings the window forward; hyprctl on Hyprland
 	focusReq      event.Tag
 
 	results chan func()
@@ -140,6 +145,7 @@ type ui struct {
 	mono                       font.Font
 	muted, line, barBg, accent color.NRGBA
 	selBg, selBgBlurred        color.NRGBA
+	markBg                     color.NRGBA   // a marked conversation's row
 	quoteColors                []color.NRGBA // by quote depth, repeating
 }
 
@@ -181,9 +187,25 @@ func (u *ui) reload() {
 			entries = append(entries, sent...)
 		}
 	}
+	// Messages the daemon is still moving stay out, so a reload after one
+	// move of a burst doesn't bring back the others for a moment; those the
+	// cache no longer has are done.
+	if len(u.moving) > 0 {
+		inCache := map[movingKey]bool{}
+		for _, e := range entries {
+			inCache[movingKey{e.FolderID, e.UID}] = true
+		}
+		for k := range u.moving {
+			if (k.folder == u.folder.ID || (u.sent != nil && k.folder == u.sent.ID)) && !inCache[k] {
+				delete(u.moving, k)
+			}
+		}
+		entries = slices.DeleteFunc(entries, func(e cache.Entry) bool { return u.moving[movingKey{e.FolderID, e.UID}] })
+	}
 	u.entries = entries
 	u.convs = buildConversations(entries, u.folder.ID, u.own)
 	u.applyFilter(keep)
+	u.pruneMarks()
 }
 
 // applyFilter rebuilds view from the search field, keeping the
@@ -384,20 +406,25 @@ func (u *ui) setSeen(uids []uint32, seen bool) {
 	}()
 }
 
-// toggleRead marks a conversation read if any of it is unread, otherwise
-// marks its newest message in the folder unread.
+// toggleRead marks the targeted conversations read if any of them is unread,
+// otherwise marks each one's newest message in the folder unread.
 func (u *ui) toggleRead() {
-	c := u.current()
-	if c == nil {
+	convs := u.targets()
+	if len(convs) == 0 {
 		return
 	}
-	if c.unread > 0 {
-		u.setSeen(c.folderUIDs(u.folder.ID, true), true)
-		return
+	// Any unread: all read. All read: each one's latest message unread.
+	var unread, latest []uint32
+	for _, c := range convs {
+		unread = append(unread, c.folderUIDs(u.folder.ID, true)...)
+		if all := c.folderUIDs(u.folder.ID, false); len(all) > 0 {
+			latest = append(latest, all[len(all)-1])
+		}
 	}
-	all := c.folderUIDs(u.folder.ID, false)
-	if len(all) > 0 {
-		u.setSeen(all[len(all)-1:], false)
+	if len(unread) > 0 {
+		u.setSeen(unread, true)
+	} else if len(latest) > 0 {
+		u.setSeen(latest, false)
 	}
 }
 
@@ -417,6 +444,7 @@ func (u *ui) showFolder(f cache.Folder) {
 		}
 	}
 	u.folder = f
+	u.clearMarks()
 	u.search.SetText("")
 	u.searching = false
 	u.list.Position = layout.Position{}

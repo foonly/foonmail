@@ -43,13 +43,39 @@ func (u *ui) destination(t moveTarget) (cache.Folder, string, bool) {
 	return f, name, ok
 }
 
-// moveConversation moves the selected conversation's messages in this
-// folder (your replies in Sent stay put). It leaves the list at once and
-// comes back if the server refuses. In the conversation view, the next
-// conversation opens. d in Trash deletes for good, after a second press.
+// movingKey is a message the GUI has asked the daemon to move or delete.
+type movingKey struct {
+	folder int64
+	uid    uint32
+}
+
+// targets is what a, s, d, v and N act on: in the list, the marked
+// conversations that are shown, or else the selected one; in the
+// conversation view, the open one.
+func (u *ui) targets() []*conversation {
+	if u.mode == modeList && len(u.marks) > 0 {
+		var out []*conversation
+		for _, i := range u.view {
+			if c := &u.convs[i]; u.marks[c.key] {
+				out = append(out, c)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if c := u.current(); c != nil {
+		return []*conversation{c}
+	}
+	return nil
+}
+
+// moveConversation moves the targeted conversations' messages in this
+// folder (your replies in Sent stay put) to Archive, Junk or Trash. d in
+// Trash deletes for good, after a second press.
 func (u *ui) moveConversation(t moveTarget) {
-	c := u.current()
-	if c == nil {
+	convs := u.targets()
+	if len(convs) == 0 {
 		return
 	}
 	if u.daemon == nil {
@@ -61,36 +87,67 @@ func (u *ui) moveConversation(t moveTarget) {
 		u.notice = "This account has no " + targetNames[t] + " folder"
 		return
 	}
-	uids := c.folderUIDs(u.folder.ID, false)
+	u.moveConvs(convs, dest, name, t == toTrash)
+}
+
+// moveConvs moves conversations' messages in this folder to dest, or
+// deletes them for good when dest is this folder and deleting is allowed
+// (d in Trash, asked twice). They leave the list at once and stay out of
+// it while the daemon works, even as it reloads after each move of a
+// burst; they come back if the server refuses. In the conversation view,
+// the next conversation opens.
+func (u *ui) moveConvs(convs []*conversation, dest cache.Folder, name string, deleting bool) {
+	folder := u.folder.ID
+	var uids []uint32
+	var keys []string
+	for _, c := range convs {
+		uids = append(uids, c.folderUIDs(folder, false)...)
+		keys = append(keys, c.key)
+	}
 	if len(uids) == 0 {
 		return
 	}
-	key := c.key
-	if dest.ID == u.folder.ID {
-		if t != toTrash {
+	pending := strings.Join(keys, "\x00")
+	if dest.ID == folder {
+		if !deleting {
 			u.notice = "Already in " + name
 			return
 		}
-		if u.pendingDelete != key {
-			u.pendingDelete = key
-			u.notice = "d again deletes this conversation for good"
+		if u.pendingDelete != pending {
+			u.pendingDelete = pending
+			u.notice = "d again deletes " + conversations(len(convs)) + " for good"
 			return
 		}
 	}
-	forever := dest.ID == u.folder.ID
+	forever := dest.ID == folder
 	u.pendingDelete = ""
 
-	// Out of the list now; the server follows.
-	folder, inView := u.folder.ID, u.mode == modeView
-	set := map[uint32]bool{}
-	for _, uid := range uids {
-		set[uid] = true
+	// The conversation to select afterwards: the first one after the
+	// selection that stays, or else the last one before it.
+	gone := map[string]bool{}
+	for _, k := range keys {
+		gone[k] = true
 	}
-	u.entries = slices.DeleteFunc(u.entries, func(e cache.Entry) bool { return e.FolderID == folder && set[e.UID] })
-	at := u.sel
+	next := ""
+	for i := u.sel; i < len(u.view) && next == ""; i++ {
+		if k := u.convs[u.view[i]].key; !gone[k] {
+			next = k
+		}
+	}
+	for i := min(u.sel, len(u.view)-1); i >= 0 && next == ""; i-- {
+		if k := u.convs[u.view[i]].key; !gone[k] {
+			next = k
+		}
+	}
+
+	for _, uid := range uids {
+		u.moving[movingKey{folder, uid}] = true
+	}
+	u.clearMarks()
+	inView := u.mode == modeView
+	u.entries = slices.DeleteFunc(u.entries, func(e cache.Entry) bool { return u.moving[movingKey{e.FolderID, e.UID}] })
 	u.convs = buildConversations(u.entries, folder, u.own)
-	u.applyFilter("")
-	u.moveTo(at) // the conversation that took its place
+	u.applyFilter(next)
 	if inView {
 		if len(u.view) > 0 {
 			u.open()
@@ -119,9 +176,12 @@ func (u *ui) moveConversation(t moveTarget) {
 			err = u.daemon.MoveMessages(ctx, folder, uids, dest.ID)
 		}
 		if err == nil {
-			return
+			return // the reload after the daemon's FolderChanged lets go of them
 		}
 		u.post(func() {
+			for _, uid := range uids {
+				delete(u.moving, movingKey{folder, uid})
+			}
 			if u.folder.ID == folder {
 				u.reload() // it's still there; show it again
 			}
@@ -133,4 +193,11 @@ func (u *ui) moveConversation(t moveTarget) {
 			}
 		})
 	}()
+}
+
+func conversations(n int) string {
+	if n == 1 {
+		return "this conversation"
+	}
+	return fmt.Sprintf("%d conversations", n)
 }
