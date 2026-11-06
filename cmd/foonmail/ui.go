@@ -388,7 +388,9 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 	c := &u.convs[u.view[i]]
 	size := image.Pt(gtx.Constraints.Max.X, u.rowH)
 	gtx.Constraints = layout.Exact(size)
-	if i == u.sel {
+	// No selection shows while a filter is being typed, so Enter isn't
+	// forgotten: the keys still go to the filter, not the list.
+	if i == u.sel && !gtx.Focused(&u.search) {
 		bg := u.selBgBlurred
 		if gtx.Focused(u.listTag) {
 			bg = u.selBg
