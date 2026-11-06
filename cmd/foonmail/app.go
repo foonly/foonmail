@@ -220,8 +220,7 @@ func (u *ui) applyFilter(keep string) {
 			}
 		}
 		if len(u.view) == 0 { // all dealt with: back to the whole list
-			u.similar = nil
-			u.clearMarks()
+			keep = u.leaveSimilar()
 		}
 	}
 	words := strings.Fields(u.search.Text())

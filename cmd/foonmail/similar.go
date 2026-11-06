@@ -16,6 +16,40 @@ import (
 type similarSet struct {
 	subject string          // what they look like, for the header
 	keys    map[string]bool // conversation keys
+
+	// Where the whole list was: its keys in order and the selected row,
+	// to come back to the same place, or the nearest conversation that
+	// is still there.
+	order []string
+	sel   int
+}
+
+// returnKey is the conversation to select back in the whole list.
+func (s *similarSet) returnKey(exists func(string) bool) string {
+	for i := s.sel; i < len(s.order); i++ {
+		if exists(s.order[i]) {
+			return s.order[i]
+		}
+	}
+	for i := min(s.sel, len(s.order)) - 1; i >= 0; i-- {
+		if exists(s.order[i]) {
+			return s.order[i]
+		}
+	}
+	return ""
+}
+
+// leaveSimilar ends the narrowed list and says which conversation to
+// select in the whole one.
+func (u *ui) leaveSimilar() string {
+	s := u.similar
+	u.similar = nil
+	u.clearMarks()
+	have := map[string]bool{}
+	for _, c := range u.convs {
+		have[c.key] = true
+	}
+	return s.returnKey(func(k string) bool { return have[k] })
 }
 
 // sender is a conversation's sender in this folder: the newest member
@@ -121,7 +155,11 @@ func (u *ui) wroteIn(c *conversation) bool {
 
 // showSimilar narrows the list to look-alikes and marks them all.
 func (u *ui) showSimilar(subject string, keys map[string]bool) {
-	u.similar = &similarSet{subject: subject, keys: keys}
+	order := make([]string, len(u.view))
+	for i, ci := range u.view {
+		order[i] = u.convs[ci].key
+	}
+	u.similar = &similarSet{subject: subject, keys: keys, order: order, sel: u.sel}
 	u.clearMarks()
 	for k := range keys {
 		u.marks[k] = true
@@ -138,11 +176,5 @@ func (u *ui) endSimilar() {
 	if u.similar == nil {
 		return
 	}
-	keep := ""
-	if c := u.current(); c != nil {
-		keep = c.key
-	}
-	u.similar = nil
-	u.clearMarks()
-	u.applyFilter(keep)
+	u.applyFilter(u.leaveSimilar())
 }

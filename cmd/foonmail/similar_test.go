@@ -73,4 +73,39 @@ func TestJunkFindsLookAlikes(t *testing.T) {
 	if h.u.similar != nil || len(h.u.view) != 4 { // Driving Glasses #1, receipt, Kahvi?, Invoice
 		t.Errorf("after Esc: %s", h.subjects())
 	}
+	if c := h.u.current(); c == nil || c.key != "spam1" {
+		t.Errorf("back in the list at %v, want the row after the junked one", c)
+	}
+}
+
+// Leaving the look-alikes returns to where the list was, not its top.
+func TestJunkReturnsToPlace(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	junk, _ := h.db.EnsureFolder(ctx, h.u.accountID, "Junk")
+	h.db.SetFolderInfo(ctx, junk.ID, ".", `\Junk`)
+	h.addBulk(6) // Bulk 6 … Bulk 1, Kahvi?, Invoice
+	var msgs []cache.NewMessage
+	for i, m := range []int{3, 0} { // one spam between Bulk 4 and 3, one below Bulk 1
+		msgs = append(msgs, cache.NewMessage{UID: uint32(300 + i), Envelope: cache.Envelope{
+			MessageID: fmt.Sprintf("glasses%d", i), Subject: "Silmiesi ei pitäisi kärsiä",
+			From: cache.Address{Name: "Driving Glasses", Addr: fmt.Sprintf("g%d@spam.example", i)},
+			Date: time.Date(2026, 11, 5, 8, m, 30, 0, time.UTC)}})
+	}
+	h.db.AddMessages(ctx, h.inbox.ID, msgs)
+	h.u.reload()
+	key := func() string { return h.u.current().subject }
+	for key() != "Silmiesi ei pitäisi kärsiä" {
+		h.press("J")
+	}
+	before := h.u.sel
+	h.press("S")
+	if len(h.u.view) != 1 {
+		t.Fatalf("look-alikes: %s", h.subjects())
+	}
+	h.press("S") // junk the other one too: the list comes back by itself
+	h.eventually("moved both", func() bool { return len(h.daemon.moveCalls()) == 2 })
+	if h.u.similar != nil || h.u.sel != before || key() != "Bulk 3" {
+		t.Errorf("back at row %d (%s), want %d; list %s", h.u.sel, key(), before, h.subjects())
+	}
 }
