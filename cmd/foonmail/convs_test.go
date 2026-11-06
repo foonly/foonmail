@@ -43,7 +43,7 @@ func TestBuildConversations(t *testing.T) {
 	if k.members[0].ID != 1 || k.members[1].FolderID != sent || k.members[2].ID != 3 {
 		t.Errorf("members not oldest first with the Sent reply between: %+v", k.members)
 	}
-	if k.people != "Liisa, me, Bob" {
+	if k.people != "Liisa Mäkelä, me, Bob Example" {
 		t.Errorf("people = %q", k.people)
 	}
 	if got := k.folderUIDs(inbox, true); len(got) != 1 || got[0] != 11 {
@@ -173,5 +173,17 @@ func TestGmailFolderOrder(t *testing.T) {
 	special, _ := specialFolders(folders, 2026)
 	if special[`\Archive`].Name != "[Gmail]/All Mail" {
 		t.Errorf("archive = %q", special[`\Archive`].Name)
+	}
+}
+
+// A sender's whole name is shown: its first word alone can say nothing.
+func TestPeopleKeepWholeNames(t *testing.T) {
+	e := func(name, addr string) cache.Entry {
+		return cache.Entry{Summary: cache.Summary{From: cache.Address{Name: name, Addr: addr}}}
+	}
+	got := people([]cache.Entry{e("The Steam Team", "noreply@steampowered.com"), e("", "bob@example.com"), e("Kim", "me@example.org")},
+		[]string{"me@example.org"})
+	if got != "me, bob@example.com, The Steam Team" {
+		t.Errorf("people = %q", got)
 	}
 }

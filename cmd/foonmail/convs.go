@@ -124,11 +124,11 @@ func people(members []cache.Entry, own []string) string {
 			continue
 		}
 		seen[k] = true
+		// Whole names: a first word alone can be "The" or "Team". The
+		// list column cuts a long line short with an ellipsis.
 		name := senderName(from)
 		if config.IsOwn(own, k) {
 			name = "me"
-		} else if f := strings.Fields(name); len(f) > 1 && !strings.Contains(name, "@") {
-			name = f[0] // first names keep the column short
 		}
 		names = append(names, name)
 	}
