@@ -27,8 +27,20 @@ type Config struct {
 	CacheDir string `toml:"cache_dir"`
 	// DataDir holds what exists only locally, such as the outbox. Default:
 	// $XDG_DATA_HOME/foonmail (~/.local/share/foonmail).
-	DataDir  string    `toml:"data_dir"`
-	Accounts []Account `toml:"account"`
+	DataDir string `toml:"data_dir"`
+	// UndoDelay is how long sent mail waits, to be taken back, before it
+	// goes. Default: 5s.
+	UndoDelay time.Duration `toml:"undo_delay"`
+	Accounts  []Account     `toml:"account"`
+}
+
+// Seconds says a duration in whole seconds for messages: "5 seconds".
+func Seconds(d time.Duration) string {
+	n := int(d.Round(time.Second) / time.Second)
+	if n == 1 {
+		return "1 second"
+	}
+	return fmt.Sprintf("%d seconds", n)
 }
 
 // Account is one mail account.
@@ -111,6 +123,9 @@ var SpecialUse = map[string]string{
 const (
 	defaultPollInterval = 5 * time.Minute
 	minPollInterval     = 30 * time.Second
+	defaultUndoDelay    = 5 * time.Second
+	minUndoDelay        = time.Second
+	maxUndoDelay        = 5 * time.Minute
 )
 
 var accountName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -176,6 +191,9 @@ func (c *Config) applyDefaults() error {
 	if c.DataDir, err = defaultDir(c.DataDir, userDataDir); err != nil {
 		return err
 	}
+	if c.UndoDelay == 0 {
+		c.UndoDelay = defaultUndoDelay
+	}
 	for i := range c.Accounts {
 		a := &c.Accounts[i]
 		if a.AppendSent == nil {
@@ -228,6 +246,9 @@ func (c *Config) validate() []string {
 	}
 	if len(c.Accounts) == 0 {
 		add("no accounts: add an [[account]] section")
+	}
+	if c.UndoDelay < minUndoDelay || c.UndoDelay > maxUndoDelay {
+		add("undo_delay must be between %s and %s", minUndoDelay, maxUndoDelay)
 	}
 	seen := map[string]bool{}
 	for i, a := range c.Accounts {

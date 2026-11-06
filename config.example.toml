@@ -16,6 +16,10 @@
 # Where what exists only locally (the outbox) lives. Default: ~/.local/share/foonmail
 # data_dir = "~/.local/share/foonmail"
 
+# How long sent mail waits, so it can be taken back, before it goes.
+# Between 1s and 5m. Default: 5s
+# undo_delay = "5s"
+
 [[account]]
 name = "home"                        # short id: a-z, 0-9, _ and -
 email = "you@example.com"            # primary address

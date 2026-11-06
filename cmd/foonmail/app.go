@@ -130,8 +130,9 @@ type ui struct {
 	missing       []*config.Account  // configured accounts not in the cache yet
 	inboxUnread   map[int64]int      // unread mail in each account's INBOX, by account id
 	dataDir       string
-	autosavePath  string // where the message being written is kept; "" for none
-	focusWindow   func() // brings the window forward; hyprctl on Hyprland
+	undoDelay     time.Duration // how long sent mail can be taken back
+	autosavePath  string        // where the message being written is kept; "" for none
+	focusWindow   func()        // brings the window forward; hyprctl on Hyprland
 	focusReq      event.Tag
 
 	results chan func()

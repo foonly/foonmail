@@ -19,6 +19,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	"foonmail/internal/config"
 	"foonmail/internal/rpc"
 )
 
@@ -82,7 +83,11 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("queued as %d; it goes out in 10 seconds unless you run: foonmailctl undo %d\n", id, id)
+		when := "after the undo delay"
+		if cfg, err := config.LoadDefault(); err == nil {
+			when = "in " + config.Seconds(cfg.UndoDelay)
+		}
+		fmt.Printf("queued as %d; it goes out %s unless you run: foonmailctl undo %d\n", id, when, id)
 		return nil
 
 	case cmd == "outbox" && len(args) == 1:

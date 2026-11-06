@@ -256,3 +256,30 @@ username = "me"
 		t.Errorf("bad aliases: %v", err)
 	}
 }
+
+func TestUndoDelay(t *testing.T) {
+	account := `
+[[account]]
+name = "home"
+email = "me@example.org"
+[account.imap]
+host = "mail.example.org"
+username = "me"
+`
+	c, err := Load(write(t, account))
+	if err != nil || c.UndoDelay != 5*time.Second {
+		t.Errorf("default: %v %v", c, err)
+	}
+	c, err = Load(write(t, "undo_delay = \"20s\"\n"+account))
+	if err != nil || c.UndoDelay != 20*time.Second {
+		t.Errorf("20s: %v %v", c.UndoDelay, err)
+	}
+	for _, bad := range []string{"500ms", "10m"} {
+		if _, err := Load(write(t, "undo_delay = \""+bad+"\"\n"+account)); err == nil || !strings.Contains(err.Error(), "undo_delay must be between") {
+			t.Errorf("%s: %v", bad, err)
+		}
+	}
+	if Seconds(5*time.Second) != "5 seconds" || Seconds(time.Second) != "1 second" {
+		t.Error("Seconds")
+	}
+}

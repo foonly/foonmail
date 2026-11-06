@@ -74,7 +74,7 @@ func setup(configPath, accountName string, log *slog.Logger) (*ui, func(), error
 	// added, or never connected) is left out with a warning.
 	ctx := context.Background()
 	u := newUI(db, log)
-	u.dataDir = cfg.DataDir
+	u.dataDir, u.undoDelay = cfg.DataDir, cfg.UndoDelay
 	var first *account
 	for i := range cfg.Accounts {
 		a, err := loadAccount(ctx, db, &cfg.Accounts[i], cfg.DataDir)

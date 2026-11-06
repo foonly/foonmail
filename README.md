@@ -33,8 +33,8 @@ There is also **foonmailctl**, a command-line tool for the daemon.
 - Color for links, quoted text (by depth), attributions and signatures.
   Quoted text at the end of a reply is folded away until you press h.
 - Writing in the window or in your own editor, with drafts, attachments,
-  replies, reply-all and forwarding. Sent mail waits 10 seconds before it
-  goes, so you can take it back.
+  replies, reply-all and forwarding. Sent mail waits 5 seconds before it
+  goes, so you can take it back (`undo_delay` in the config changes that).
 - Address suggestions in To, Cc and Bcc from the people you exchange mail
   with, those you write to most and most recently first.
 - A signature per account, added to new messages, replies and forwards.

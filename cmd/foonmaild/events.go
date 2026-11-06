@@ -106,7 +106,7 @@ func newHub(ctx context.Context, cfg *config.Config, db *cache.DB, n notifier, t
 		outboxEvents: make(chan outbox.Event, 64),
 		undoResults:  make(chan undoResult, 8),
 		sendNotes:    map[int64]uint32{},
-		undoWindow:   10 * time.Second,
+		undoWindow:   cfg.UndoDelay,
 	}
 	for i := range cfg.Accounts {
 		a := &cfg.Accounts[i]

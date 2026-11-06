@@ -73,7 +73,7 @@ type Options struct {
 	Sender   Sender
 	Copier   Copier
 	Notify   func(Event)   // nil: events are dropped
-	Delay    time.Duration // undo window; default 10 seconds
+	Delay    time.Duration // undo window; default 10 seconds (foonmaild passes the configured undo_delay)
 	Log      *slog.Logger
 	Now      func() time.Time
 }

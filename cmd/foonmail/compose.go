@@ -238,7 +238,10 @@ func (u *ui) sendComposed() {
 				if u.comp == c {
 					u.leaveCompose()
 				}
-				u.notice = "Sending to " + firstRecipient(to) + " · undo from the notification within 10 seconds"
+				u.notice = "Sending to " + firstRecipient(to) + " · undo from the notification"
+				if u.undoDelay > 0 {
+					u.notice += " within " + config.Seconds(u.undoDelay)
+				}
 			}
 		})
 	}()

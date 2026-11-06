@@ -117,6 +117,7 @@ func run(configPath string, log *slog.Logger) error {
 		Sender:   sender,
 		Copier:   copies,
 		Notify:   h.notifyOutbox,
+		Delay:    cfg.UndoDelay,
 		Log:      log,
 	})
 	if err != nil {
