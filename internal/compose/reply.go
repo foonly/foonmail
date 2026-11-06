@@ -3,7 +3,7 @@ package compose
 import (
 	"encoding/base64"
 	"fmt"
-	"mime"
+	"foonmail/internal/hdr"
 	"regexp"
 	"slices"
 	"strings"
@@ -282,10 +282,7 @@ func draftHeader(raw []byte, key string) string {
 	for _, line := range strings.Split(head, "\n") {
 		if strings.HasPrefix(strings.ToLower(line), prefix) {
 			v := strings.TrimSpace(line[len(prefix):])
-			if dec, err := new(mime.WordDecoder).DecodeHeader(v); err == nil {
-				return dec
-			}
-			return v
+			return hdr.Decode(v)
 		}
 	}
 	return ""

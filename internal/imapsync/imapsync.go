@@ -27,6 +27,7 @@ import (
 
 	"foonmail/internal/cache"
 	"foonmail/internal/config"
+	"foonmail/internal/hdr"
 )
 
 const (
@@ -196,6 +197,7 @@ func (s *Syncer) connect(handler *imapclient.UnilateralDataHandler) (*imapclient
 	opts := &imapclient.Options{
 		Dialer:                &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second},
 		UnilateralDataHandler: handler,
+		WordDecoder:           hdr.Decoder,
 	}
 	pass, err := s.opts.Password(s.acct.IMAP)
 	if err != nil {

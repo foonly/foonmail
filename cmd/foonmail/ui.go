@@ -463,7 +463,7 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 			layout.Rigid(u.cell(36, count, font.Font{}, u.muted)),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				l := material.Label(u.th, u.th.TextSize, subject)
-				l.MaxLines, l.Font = 1, f
+				l.MaxLines, l.Font.Weight = 1, f.Weight
 				return l.Layout(gtx)
 			}),
 		)
@@ -478,7 +478,7 @@ func (u *ui) cell(widthDp unit.Dp, text string, f font.Font, c color.NRGBA) layo
 		inner.Constraints.Max.X = max(0, w-gtx.Dp(8))
 		inner.Constraints.Min.X = 0
 		l := material.Label(u.th, u.th.TextSize, text)
-		l.MaxLines, l.Font, l.Color = 1, f, c
+		l.MaxLines, l.Font.Weight, l.Color = 1, f.Weight, c // keeps the theme face, with its emoji font
 		d := l.Layout(inner)
 		d.Size.X = w
 		return d

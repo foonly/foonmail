@@ -538,7 +538,7 @@ func (u *ui) paneRow(gtx layout.Context, i int) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				l := material.Label(u.th, u.th.TextSize, r.label)
-				l.MaxLines, l.Font = 1, f
+				l.MaxLines, l.Font.Weight = 1, f.Weight
 				return l.Layout(gtx)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

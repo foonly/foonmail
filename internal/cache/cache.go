@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"foonmail/internal/hdr"
+
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
@@ -94,6 +96,7 @@ func (d *DB) migrate() error {
 	if version > len(migrations) {
 		return fmt.Errorf("schema version %d is newer than this foonmail (%d); upgrade foonmail", version, len(migrations))
 	}
+	defer d.decodeStored()
 	for v := version; v < len(migrations); v++ {
 		err := d.tx(context.Background(), func(tx *sql.Tx) error {
 			if _, err := tx.Exec(migrations[v]); err != nil {
@@ -339,7 +342,8 @@ func findOrInsertMessage(ctx context.Context, tx *sql.Tx, accountID int64, m New
 		INSERT INTO messages (account_id, message_id, subject, from_name, from_addr, to_list, cc_list,
 		                      date, in_reply_to, refs, size)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		accountID, e.MessageID, e.Subject, e.From.Name, e.From.Addr, joinAddrs(e.To), joinAddrs(e.Cc),
+		accountID, e.MessageID, hdr.Decode(e.Subject), hdr.Decode(e.From.Name), e.From.Addr,
+		joinAddrs(decodeNames(e.To)), joinAddrs(decodeNames(e.Cc)),
 		date, e.InReplyTo, strings.Join(e.References, " "), m.Size)
 	if err != nil {
 		return 0, err
