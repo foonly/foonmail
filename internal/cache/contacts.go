@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"foonmail/internal/config"
 )
 
 // Correspondent is someone mail was exchanged with.
@@ -38,10 +40,7 @@ func parseList(s string) []Address {
 // of the rest, excluding yourself. Each keeps the latest name seen with
 // the address.
 func (d *DB) Correspondents(ctx context.Context, accountID int64, own []string) ([]Correspondent, error) {
-	mine := map[string]bool{}
-	for _, a := range own {
-		mine[strings.ToLower(a)] = true
-	}
+	mine := func(addr string) bool { return config.IsOwn(own, addr) }
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT from_name, from_addr, to_list, cc_list, date FROM messages
 		WHERE account_id = ? ORDER BY date`, accountID)
@@ -53,7 +52,7 @@ func (d *DB) Correspondents(ctx context.Context, accountID int64, own []string) 
 	var order []string
 	note := func(a Address, when time.Time, sent bool) {
 		key := strings.ToLower(strings.TrimSpace(a.Addr))
-		if key == "" || mine[key] {
+		if key == "" || mine(key) {
 			return
 		}
 		c := byAddr[key]
@@ -81,7 +80,7 @@ func (d *DB) Correspondents(ctx context.Context, accountID int64, own []string) 
 			return nil, err
 		}
 		when := time.Unix(date, 0)
-		if mine[strings.ToLower(fromAddr)] {
+		if mine(fromAddr) {
 			for _, a := range append(parseList(to), parseList(cc)...) {
 				note(a, when, true)
 			}

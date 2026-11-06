@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/mail"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"foonmail/internal/cache"
 	"foonmail/internal/config"
@@ -79,12 +77,11 @@ func (u *ui) accountFor(from string, fallback *config.Account) *config.Account {
 	if err != nil {
 		return fallback
 	}
-	want := strings.ToLower(addr.Address)
-	if slices.Contains(fallback.Addresses(), want) {
+	if config.IsOwn(fallback.Addresses(), addr.Address) {
 		return fallback
 	}
 	for _, a := range u.accounts {
-		if slices.Contains(a.own, want) {
+		if config.IsOwn(a.own, addr.Address) {
 			return a.cfg
 		}
 	}

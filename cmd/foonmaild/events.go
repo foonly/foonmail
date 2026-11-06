@@ -456,7 +456,7 @@ func shouldNotify(own []string, ev imapsync.NewMail) (bool, string) {
 	if ev.Seen {
 		return false, "already read"
 	}
-	if slices.Contains(own, strings.ToLower(ev.Envelope.From.Addr)) {
+	if config.IsOwn(own, ev.Envelope.From.Addr) {
 		return false, "from you"
 	}
 	return true, ""

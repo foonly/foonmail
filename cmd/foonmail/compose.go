@@ -168,7 +168,7 @@ func (u *ui) replyFromList(kind replyKind) {
 	}
 	pick := c.members[len(c.members)-1]
 	for i := len(c.members) - 1; i >= 0; i-- {
-		if !slices.Contains(u.own, strings.ToLower(c.members[i].From.Addr)) {
+		if !config.IsOwn(u.own, c.members[i].From.Addr) {
 			pick = c.members[i]
 			break
 		}

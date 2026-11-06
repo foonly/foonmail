@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"foonmail/internal/cache"
+	"foonmail/internal/config"
 	"foonmail/internal/thread"
 )
 
@@ -124,7 +125,7 @@ func people(members []cache.Entry, own []string) string {
 		}
 		seen[k] = true
 		name := senderName(from)
-		if slices.Contains(own, k) {
+		if config.IsOwn(own, k) {
 			name = "me"
 		} else if f := strings.Fields(name); len(f) > 1 && !strings.Contains(name, "@") {
 			name = f[0] // first names keep the column short

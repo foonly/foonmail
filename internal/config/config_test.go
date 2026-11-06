@@ -216,3 +216,43 @@ username = "me"
 		t.Errorf("home: %+v", h)
 	}
 }
+
+func TestDomainAliases(t *testing.T) {
+	c, err := Load(write(t, `
+[[account]]
+name = "home"
+email = "me@example.org"
+aliases = ["Kim.Strom@Example.org", "@Example.DEV"]
+[account.imap]
+host = "mail.example.org"
+username = "me"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := c.Accounts[0].Addresses()
+	if got := strings.Join(own, " "); got != "me@example.org kim.strom@example.org @example.dev" {
+		t.Errorf("Addresses = %s", got)
+	}
+	for addr, want := range map[string]bool{
+		"me@example.org": true, "KIM.STROM@example.org": true, "anything@example.dev": true, "Shop@EXAMPLE.dev": true,
+		"other@example.org": false, "me@notexample.dev": false, "example.dev": false, "": false,
+	} {
+		if got := IsOwn(own, addr); got != want {
+			t.Errorf("IsOwn(%q) = %v", addr, got)
+		}
+	}
+
+	_, err = Load(write(t, `
+[[account]]
+name = "home"
+email = "me@example.org"
+aliases = ["@", "@nodot", "not an address"]
+[account.imap]
+host = "mail.example.org"
+username = "me"
+`))
+	if err == nil || strings.Count(err.Error(), "is not a valid address or @domain") != 3 {
+		t.Errorf("bad aliases: %v", err)
+	}
+}

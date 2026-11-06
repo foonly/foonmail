@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -54,7 +53,7 @@ func prepare(raw []byte, acct *config.Account, now time.Time) (*prepared, error)
 		h.SetAddressList("From", from)
 	}
 	p := &prepared{from: acct.Email}
-	if slices.Contains(own, strings.ToLower(from[0].Address)) {
+	if config.IsOwn(own, from[0].Address) {
 		p.from = from[0].Address
 	}
 

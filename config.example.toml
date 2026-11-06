@@ -20,7 +20,11 @@
 name = "home"                        # short id: a-z, 0-9, _ and -
 email = "you@example.com"            # primary address
 display_name = "Your Name"
-aliases = ["postmaster@example.com"] # other addresses that are you
+# Other addresses that are you: a reply goes out from the one the message
+# was sent to, they're left out of reply-all, mail from them doesn't notify,
+# and they aren't suggested as contacts. "@domain" covers a whole domain,
+# such as one whose mail is all forwarded here.
+aliases = ["postmaster@example.com", "@example.net"]
 
 # Added under a "-- " line to new messages, replies and forwards.
 # signature = """

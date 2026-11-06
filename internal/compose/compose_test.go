@@ -303,3 +303,24 @@ func TestTrailingCommaInAddresses(t *testing.T) {
 		t.Errorf("headers:\n%s", s)
 	}
 }
+
+// Mail to any address at a domain alias is answered from that address,
+// and the address isn't copied into reply-all.
+func TestReplyFromDomainAlias(t *testing.T) {
+	a := acct()
+	a.Aliases = []string{"@example.dev"}
+	orig := &render.Message{
+		From:      []render.Address{{Name: "Shop", Addr: "orders@shop.example"}},
+		To:        []render.Address{{Addr: "shop-signup@example.dev"}},
+		Cc:        []render.Address{{Addr: "friend@example.com"}},
+		Subject:   "Your order",
+		MessageID: "o1@shop",
+	}
+	d := Reply(a, orig, ReplyAll)
+	if !strings.Contains(d.From, "<shop-signup@example.dev>") {
+		t.Errorf("From = %q", d.From)
+	}
+	if d.To != "Shop <orders@shop.example>" || d.Cc != "friend@example.com" {
+		t.Errorf("To %q, Cc %q", d.To, d.Cc)
+	}
+}

@@ -57,7 +57,7 @@ const (
 // place (an empty line) above it.
 func Reply(acct *config.Account, orig *render.Message, mode ReplyMode) *Draft {
 	own := acct.Addresses()
-	isOwn := func(a render.Address) bool { return slices.Contains(own, strings.ToLower(a.Addr)) }
+	isOwn := func(a render.Address) bool { return config.IsOwn(own, a.Addr) }
 
 	d := &Draft{From: identity(acct, ownRecipient(orig, own))}
 	fromMe := len(orig.From) > 0 && isOwn(orig.From[0])
@@ -153,7 +153,7 @@ func identity(acct *config.Account, addr string) string {
 // ownRecipient returns the first of your addresses the message was sent to.
 func ownRecipient(m *render.Message, own []string) string {
 	for _, a := range append(slices.Clone(m.To), m.Cc...) {
-		if slices.Contains(own, strings.ToLower(a.Addr)) {
+		if config.IsOwn(own, a.Addr) {
 			return a.Addr
 		}
 	}

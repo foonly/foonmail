@@ -37,7 +37,7 @@ type Account struct {
 	Name        string   `toml:"name"`
 	Email       string   `toml:"email"`
 	DisplayName string   `toml:"display_name"`
-	Aliases     []string `toml:"aliases"`
+	Aliases     []string `toml:"aliases"` // other addresses that are you; "@example.org" for a whole domain
 	// Signature is added under a "-- " line to new messages, replies and
 	// forwards, above any quoted text. Default: none.
 	Signature string `toml:"signature"`
@@ -251,8 +251,11 @@ func (c *Config) validate() []string {
 			add("%s: email %q is not a valid address", where, a.Email)
 		}
 		for _, al := range a.Aliases {
+			if _, ok := domainAlias(al); ok {
+				continue
+			}
 			if _, err := mail.ParseAddress(al); err != nil {
-				add("%s: alias %q is not a valid address", where, al)
+				add("%s: alias %q is not a valid address or @domain", where, al)
 			}
 		}
 		p = append(p, validateServer(where+": imap", a.IMAP)...)
@@ -316,15 +319,43 @@ func (c *Config) Account(name string) (*Account, error) {
 }
 
 // Addresses returns the account's own addresses: email plus aliases,
-// lowercased, for recognizing mail from yourself.
+// lowercased, for recognizing mail from yourself. An alias "@example.org"
+// stands for every address at that domain; check with IsOwn.
 func (a *Account) Addresses() []string {
 	var out []string
 	for _, s := range append([]string{a.Email}, a.Aliases...) {
-		if addr, err := mail.ParseAddress(s); err == nil {
+		if d, ok := domainAlias(s); ok {
+			out = append(out, "@"+d)
+		} else if addr, err := mail.ParseAddress(s); err == nil {
 			out = append(out, strings.ToLower(addr.Address))
 		}
 	}
 	return out
+}
+
+// IsOwn reports whether addr is one of own, as Addresses lists them: the
+// same address, or any address at an "@domain" entry's domain.
+func IsOwn(own []string, addr string) bool {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if addr == "" {
+		return false
+	}
+	for _, o := range own {
+		if o == addr || (strings.HasPrefix(o, "@") && strings.HasSuffix(addr, o)) {
+			return true
+		}
+	}
+	return false
+}
+
+// domainAlias recognizes an alias for a whole domain, "@example.org",
+// returning the domain lowercased.
+func domainAlias(s string) (string, bool) {
+	d, ok := strings.CutPrefix(strings.TrimSpace(s), "@")
+	if !ok || !strings.Contains(d, ".") || strings.ContainsAny(d, "@ <>,;") {
+		return "", false
+	}
+	return strings.ToLower(d), true
 }
 
 func ptr[T any](v T) *T { return &v }
