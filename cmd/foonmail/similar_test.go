@@ -23,6 +23,11 @@ func TestAlike(t *testing.T) {
 		{"Shop", "shop@example.com", "Your order 123 has shipped", "Shop", "shop@example.com", "Your order 456 has shipped", true},
 		{"Shop", "shop@example.com", "Your order has shipped", "Shop", "shop@example.com", "Weekly newsletter", false},
 		{"Bob", "bob@example.com", "Invoice", "Alice", "alice@other.example", "Invoice", false},
+		// Any sender, with the same subject of three words or more.
+		{"Anna", "a@one.example", "Congratulations, you have won an iPhone 17!", "Prize Team", "x@two.example", "Congratulations you have won an iPhone", true},
+		{"Anna", "a@one.example", "Meeting on Monday", "Bob", "bob@example.com", "Meeting on Monday", true},
+		{"Anna", "a@one.example", "Re: hello there", "Bob", "bob@example.com", "Hello there", false},
+		{"Anna", "a@one.example", "Your order has shipped today", "Bob", "b@two.example", "Your order was cancelled today", false},
 		{"Club One", "news@club.example", "Sale now", "Club One Offers", "deals@club.example", "Sale now on", true},
 	} {
 		if got := alike(c.nameA, c.addrA, c.subjA, c.nameB, c.addrB, c.subjB); got != c.want {

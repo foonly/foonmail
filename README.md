@@ -51,7 +51,8 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   creates and deletes folders.
 - Junking a message brings up the rest of the spam run: the conversations
   in the folder from the same sender (or the same name with a number
-  added) with mostly the same subject, ready to junk or trash in one go.
+  added) with mostly the same subject, or from anyone with nearly the
+  same subject, ready to review and junk or trash in one go.
 - A tray icon (StatusNotifierItem) that lights up for new mail, and
   notifications that open the message when clicked.
 
@@ -147,7 +148,7 @@ The bottom line of the window always shows the keys for what you're doing.
 | v | move to a folder (the folder pane opens to choose one) |
 | Shift+j/k, Space | mark a range / mark one; a, s, d, v and N then act on all marked (Esc clears) |
 | N | mark read or unread |
-| after s | the list shows the other conversations that look like the junked mail (same sender, mostly the same subject), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
+| after s | the list shows the other conversations that look like the junked mail (same sender and mostly the same subject, or any sender with nearly the same subject of three words or more), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
 | u | only unread conversations (ones you read stay until u or Esc turns it off) |
 | / | filter |
 

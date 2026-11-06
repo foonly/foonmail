@@ -108,13 +108,21 @@ func domain(addr string) string {
 // alike says whether two messages look like the same spam: from the same
 // sender (by address, or by name with numbers and punctuation left out,
 // as spammers change addresses), or a similar name at the same domain,
-// with mostly the same subject words.
+// with mostly the same subject words; or from anyone, with nearly the
+// same subject of a few words at least, as spam runs also change the
+// sender each time. Short subjects ("Invoice") don't count alone, and
+// the list asks before anything is moved.
 func alike(nameA, addrA, subjA, nameB, addrB, subjB string) bool {
 	wa, wb := words(nameA), words(nameB)
+	sa, sb := words(subjA), words(subjB)
+	subjects := overlap(sa, sb)
+	if subjects >= 0.8 && min(len(sa), len(sb)) >= 3 {
+		return true
+	}
 	sameSender := addrA == addrB ||
 		(len(wa) > 0 && strings.Join(wa, " ") == strings.Join(wb, " ")) ||
 		(domain(addrA) == domain(addrB) && overlap(wa, wb) >= 0.5)
-	return sameSender && overlap(words(subjA), words(subjB)) >= 0.5
+	return sameSender && subjects >= 0.5
 }
 
 // findSimilar lists the conversations in the folder, other than the given
