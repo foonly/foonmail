@@ -339,3 +339,21 @@ func TestLenientMessageIDs(t *testing.T) {
 		t.Errorf("MessageID %q, References %v", m.MessageID, m.References)
 	}
 }
+
+// Layouts such as MJML set font-size:0 on wrappers to close the gaps
+// between inline blocks and size the text inside; that isn't hidden. A
+// preheader with font-size:0 and nothing resized inside still is.
+func TestZeroFontWrappers(t *testing.T) {
+	html := `<div style="font-size:0px;color:#fff">Preview line only</div>
+<table><tr><td style="direction:ltr;font-size:0px;padding:16px;">
+<div style="font-size:0px;display:inline-block;width:100%">
+<table><tr><td><div style="font-family:Ubuntu;font-size:16px;line-height:1">Thanks for your order, Kim!</div></td></tr></table>
+</div></td></tr></table>`
+	m := mustRender(t, raw([]string{"Content-Type: text/html; charset=utf-8"}, html), Options{})
+	if !strings.Contains(m.Text, "Thanks for your order, Kim!") {
+		t.Errorf("text inside font-size:0 wrappers is missing:\n%s", m.Text)
+	}
+	if strings.Contains(m.Text, "Preview line") {
+		t.Errorf("the hidden preheader shows:\n%s", m.Text)
+	}
+}

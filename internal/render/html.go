@@ -41,7 +41,15 @@ var lines = map[atom.Atom]bool{
 // "preheader" (the preview line) this way, often padded with invisible
 // characters.
 var hiddenStyle = regexp.MustCompile(`(?i)display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all|` +
-	`max-height\s*:\s*0(px)?\s*(;|!|$)|opacity\s*:\s*0(\.0+)?\s*(;|!|$)|font-size\s*:\s*0(px)?\s*(;|!|$)`)
+	`max-height\s*:\s*0(px)?\s*(;|!|$)|opacity\s*:\s*0(\.0+)?\s*(;|!|$)`)
+
+// zeroFont is font-size:0, which hides text only when nothing inside sets
+// the size again: layouts (MJML among them) put it on their wrappers to
+// close the gaps between inline blocks, and size the text within.
+var zeroFont = regexp.MustCompile(`(?i)font-size\s*:\s*0(px|pt|em|rem|%)?\s*(;|!|$)`)
+
+// fontSize matches a font size set to something visible.
+var fontSize = regexp.MustCompile(`(?i)font-size\s*:\s*(0*[1-9]|0*\.\d*[1-9]|[a-z])`)
 
 // invisible are characters with no width that newsletters use as padding.
 var invisible = strings.NewReplacer(
@@ -346,6 +354,23 @@ func isHidden(n *html.Node) bool {
 			if hiddenStyle.MatchString(a.Val) {
 				return true
 			}
+			if zeroFont.MatchString(a.Val) && !resizedInside(n) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resizedInside says whether an element inside n sets a visible font
+// size, or has a font element with a size.
+func resizedInside(n *html.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != html.ElementNode {
+			continue
+		}
+		if fontSize.MatchString(attr(c, "style")) || (c.DataAtom == atom.Font && attr(c, "size") != "") || resizedInside(c) {
+			return true
 		}
 	}
 	return false
