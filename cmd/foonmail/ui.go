@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · u unread only · / filter"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
+	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -135,6 +135,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: key.NameEnter},
 			key.Filter{Focus: t, Name: "N", Required: key.ModShift},
 			key.Filter{Focus: t, Name: "U"},
+			key.Filter{Focus: t, Name: "!", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: "C"},
 			key.Filter{Focus: t, Name: key.NameLeftArrow},
 			key.Filter{Focus: t, Name: "/", Optional: key.ModShift},
@@ -195,6 +196,8 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.toggleRead()
 		case "U":
 			u.toggleUnreadOnly()
+		case "!":
+			u.toggleFlagged()
 		case "C", key.NameLeftArrow:
 			u.openPane()
 		case "A":
@@ -334,7 +337,7 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 	case u.similar != nil:
 		hints = fmt.Sprintf("Look-alikes of the junked mail, %d marked · s junks the marked · d trashes them · Space unmarks · Esc back to all", u.markCount())
 	case u.markCount() > 0:
-		hints = fmt.Sprintf("%d marked · a archive · s junk · d trash · v move to · N read/unread · Space or Shift+j/k mark more · Esc clears", u.markCount())
+		hints = fmt.Sprintf("%d marked · a archive · s junk · d trash · v move to · N read/unread · ! flag · Space or Shift+j/k mark more · Esc clears", u.markCount())
 	}
 	children = append(children, layout.Rigid(u.statusBar(hints)))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -536,6 +539,7 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "J"},
 			key.Filter{Name: "K"},
 			key.Filter{Name: "N"},
+			key.Filter{Name: "!", Optional: key.ModShift},
 			key.Filter{Name: "P"},
 			key.Filter{Name: "H"},
 			key.Filter{Name: "A"},
@@ -608,6 +612,8 @@ func (u *ui) updateView(gtx layout.Context) {
 			o.list.Position = layout.Position{First: o.cur}
 		case name == "H":
 			o.showQuotes = !o.showQuotes
+		case name == "!":
+			u.toggleFlagged()
 		case name == "A":
 			u.moveConversation(toArchive)
 		case name == "S":

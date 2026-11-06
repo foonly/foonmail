@@ -146,8 +146,9 @@ The bottom line of the window always shows the keys for what you're doing.
 | r / g / f | reply / reply all / forward |
 | a / s / d | archive / junk / trash |
 | v | move to a folder (the folder pane opens to choose one) |
-| Shift+j/k, Space | mark a range / mark one; a, s, d, v and N then act on all marked (Esc clears) |
+| Shift+j/k, Space | mark a range / mark one; a, s, d, v, N and ! then act on all marked (Esc clears) |
 | N | mark read or unread |
+| ! | flag or unflag (shown as ! in the list; other clients call it a star) |
 | after s | the list shows the other conversations that look like the junked mail (same sender and mostly the same subject, or any sender with nearly the same subject of three words or more), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
 | u | only unread conversations (ones you read stay until u or Esc turns it off) |
 | / | filter |
@@ -166,6 +167,7 @@ The bottom line of the window always shows the keys for what you're doing.
 | j / k, → / ← | next / previous conversation |
 | Space / - | page down / up |
 | h | show or hide quoted text |
+| ! | flag or unflag the conversation |
 | number, Enter | open that link |
 | o / w | open / save the attachment (type its number first if there are several) |
 | b | show the message's HTML in your browser, with remote content blocked |

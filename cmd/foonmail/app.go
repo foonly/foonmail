@@ -384,10 +384,13 @@ func (u *ui) loadRaw(s cache.Summary) ([]byte, error) {
 	return raw, err
 }
 
-// setSeen marks messages of the current folder read or unread: at once in
-// the list, then on the server through the daemon, undoing the change if
-// that fails. It runs on the UI goroutine.
-func (u *ui) setSeen(uids []uint32, seen bool) {
+// setSeen marks messages of the current folder read or unread.
+func (u *ui) setSeen(uids []uint32, seen bool) { u.setFlagOn(uids, `\Seen`, seen) }
+
+// setFlagOn sets or clears a flag on messages of the current folder: at
+// once in the list, then on the server through the daemon, undoing the
+// change if that fails. It runs on the UI goroutine.
+func (u *ui) setFlagOn(uids []uint32, flag string, seen bool) {
 	if len(uids) == 0 {
 		return
 	}
@@ -406,7 +409,7 @@ func (u *ui) setSeen(uids []uint32, seen bool) {
 		}
 		for i := range u.entries {
 			if e := &u.entries[i]; e.FolderID == folder && set[e.UID] {
-				e.Flags = setFlag(e.Flags, `\Seen`, on)
+				e.Flags = setFlag(e.Flags, flag, on)
 			}
 		}
 		keep := ""
@@ -420,9 +423,9 @@ func (u *ui) setSeen(uids []uint32, seen bool) {
 	go func() {
 		var add, remove []string
 		if seen {
-			add = []string{`\Seen`}
+			add = []string{flag}
 		} else {
-			remove = []string{`\Seen`}
+			remove = []string{flag}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -451,6 +454,30 @@ func (u *ui) toggleRead() {
 		u.setSeen(unread, true)
 	} else if len(latest) > 0 {
 		u.setSeen(latest, false)
+	}
+}
+
+// toggleFlagged unflags the targeted conversations if any of them is
+// flagged, otherwise flags each one's newest message in the folder.
+func (u *ui) toggleFlagged() {
+	convs := u.targets()
+	var flaggedUIDs, latest []uint32
+	for _, c := range convs {
+		for _, m := range slices.Concat(c.members, c.copies) {
+			if m.FolderID == u.folder.ID && flagged(m.Summary) {
+				flaggedUIDs = append(flaggedUIDs, m.UID)
+			}
+		}
+		if all := c.folderUIDs(u.folder.ID, false); len(all) > 0 {
+			latest = append(latest, all[len(all)-1])
+		}
+	}
+	if len(flaggedUIDs) > 0 {
+		u.setFlagOn(flaggedUIDs, `\Flagged`, false)
+		u.notice = "Unflagged " + conversations(len(convs))
+	} else if len(latest) > 0 {
+		u.setFlagOn(latest, `\Flagged`, true)
+		u.notice = "Flagged " + conversations(len(convs))
 	}
 }
 
