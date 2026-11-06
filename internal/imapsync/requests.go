@@ -38,6 +38,8 @@ const (
 	reqAppend
 	reqDelete
 	reqMove
+	reqCreateFolder
+	reqDeleteFolder
 )
 
 // request is work for the folder connection, from the GUI by way of the
@@ -51,6 +53,7 @@ type request struct {
 	specialUse  string // reqAppend: the folder, by special-use flag
 	dest        int64  // reqMove: the destination folder
 	raw         []byte
+	name        string // reqCreateFolder: the new folder's name, "/" between levels
 	reply       chan reqResult
 }
 
@@ -107,8 +110,14 @@ func (s *Syncer) request(ctx context.Context, req request) reqResult {
 // handleRequest runs a request on the folder connection. It leaves no
 // folder selected.
 func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req request, condstore bool) reqResult {
-	if req.kind == reqAppend {
+	switch req.kind {
+	case reqAppend:
 		return reqResult{err: s.appendMessage(ctx, c, req, condstore)}
+	case reqCreateFolder:
+		id, err := s.createFolder(ctx, c, req.name)
+		return reqResult{messageID: id, err: err}
+	case reqDeleteFolder:
+		return reqResult{err: s.deleteFolder(ctx, c, req.folderID)}
 	}
 	f, err := s.db.FolderByID(ctx, req.folderID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && f.AccountID != s.accountID) {

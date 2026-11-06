@@ -155,6 +155,7 @@ func newUI(db *cache.DB, log *slog.Logger) *ui {
 	u.th.TextSize = 15
 	u.th.Face = withEmoji("sans-serif")
 	u.search.SingleLine, u.search.Submit = true, true
+	u.pane.name.SingleLine, u.pane.name.Submit = true, true
 	u.focusReq = u.listTag
 	if desktop.PrefersDark() {
 		u.th.Palette = material.Palette{Bg: rgb(0x1d1f21), Fg: rgb(0xe0e0e0), ContrastBg: rgb(0x6ea8fe), ContrastFg: rgb(0x1d1f21)}

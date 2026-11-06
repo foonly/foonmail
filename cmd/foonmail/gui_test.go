@@ -35,18 +35,19 @@ type fakeDaemon struct {
 	db  *cache.DB
 	raw map[int64][]byte // by cache message id
 
-	mu       sync.Mutex
-	fetched  []int64
-	flagged  []string
-	synced   []int64
-	sent     [][]byte
-	sentVia  []string // the account of each sent message
-	drafts   [][]byte
-	deleted  []string
-	moved    []string
-	moveErr  error
-	err      error // returned by every call
-	flagsErr error
+	mu          sync.Mutex
+	fetched     []int64
+	flagged     []string
+	synced      []int64
+	sent        [][]byte
+	sentVia     []string // the account of each sent message
+	drafts      [][]byte
+	deleted     []string
+	moved       []string
+	moveErr     error
+	folderCalls []string
+	err         error // returned by every call
+	flagsErr    error
 }
 
 func (d *fakeDaemon) FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error) {
@@ -116,6 +117,34 @@ func (d *fakeDaemon) MoveMessages(_ context.Context, folderID int64, uids []uint
 	defer d.mu.Unlock()
 	d.moved = append(d.moved, fmt.Sprintf("%d:%v->%d", folderID, uids, dest))
 	return d.moveErr
+}
+
+func (d *fakeDaemon) CreateFolder(ctx context.Context, account, name string) (int64, error) {
+	if d.err != nil {
+		return 0, d.err
+	}
+	acct, _ := d.db.AccountID(ctx, account)
+	f, err := d.db.EnsureFolder(ctx, acct, name)
+	d.mu.Lock()
+	d.folderCalls = append(d.folderCalls, "create "+account+" "+name)
+	d.mu.Unlock()
+	return f.ID, err
+}
+
+func (d *fakeDaemon) DeleteFolder(ctx context.Context, folderID int64) error {
+	if d.err != nil {
+		return d.err
+	}
+	d.mu.Lock()
+	d.folderCalls = append(d.folderCalls, fmt.Sprint("delete ", folderID))
+	d.mu.Unlock()
+	return d.db.DeleteFolder(ctx, folderID)
+}
+
+func (d *fakeDaemon) folderCallList() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.folderCalls)
 }
 
 func (d *fakeDaemon) moveCalls() []string {

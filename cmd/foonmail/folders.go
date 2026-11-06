@@ -46,6 +46,10 @@ type folderPane struct {
 	// account's folders, as the daemon moves mail within an account, and
 	// doesn't preview them.
 	moving []string
+
+	naming   bool          // n: the name field for a new folder is open
+	name     widget.Editor // the new folder's name
+	deleting int64         // the folder a first d asked to delete
 }
 
 // folderRow is one line of the folder pane: a folder, or with several
@@ -259,6 +263,7 @@ func (u *ui) openPane() {
 
 func (u *ui) closePane() {
 	u.pane.open, u.pane.changed, u.pane.moving = false, u.now(), nil
+	u.pane.naming, u.pane.deleting = false, 0
 	u.focusReq = u.listTag
 }
 
@@ -390,6 +395,7 @@ func (p *folderPane) keepVisible(u *ui) {
 }
 
 func (u *ui) updateFolderPane(gtx layout.Context) {
+	u.updateNameField(gtx)
 	p := &u.pane
 	t := p.tag
 	for {
@@ -409,6 +415,9 @@ func (u *ui) updateFolderPane(gtx layout.Context) {
 			key.Filter{Focus: t, Name: key.NameLeftArrow},
 			key.Filter{Focus: t, Name: key.NameEscape},
 			key.Filter{Focus: t, Name: "C"},
+			key.Filter{Focus: t, Name: "N"},
+			key.Filter{Focus: t, Name: "D"},
+			key.Filter{Focus: t, Name: key.NameDeleteForward},
 		)
 		if !ok {
 			break
@@ -418,7 +427,15 @@ func (u *ui) updateFolderPane(gtx layout.Context) {
 			continue
 		}
 		page := max(1, u.viewH/max(1, u.rowH)-1)
+		if ke.Name != "D" && ke.Name != key.NameDeleteForward && p.deleting != 0 {
+			p.deleting = 0 // anything else calls off a delete
+			u.notice = ""
+		}
 		switch ke.Name {
+		case "N":
+			u.startNewFolder()
+		case "D", key.NameDeleteForward:
+			u.deleteFolder()
 		case "J", key.NameDownArrow:
 			u.movePane(p.sel + 1)
 		case "K", key.NameUpArrow:

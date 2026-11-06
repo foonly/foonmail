@@ -27,6 +27,8 @@ type backend interface {
 	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
 	MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error
 	AppendDraft(ctx context.Context, raw []byte) error
+	CreateFolder(ctx context.Context, name string) (int64, error)
+	DeleteFolder(ctx context.Context, folderID int64) error
 }
 
 // service exports rpc.Interface on the session bus.
@@ -258,4 +260,32 @@ func (m methods) MoveMessages(folderID int64, uids []uint32, dest int64) *dbus.E
 		return dbusError(err)
 	}
 	return dbusError(b.MoveMessages(ctx, folderID, uids, dest))
+}
+
+// CreateFolder makes a folder in an account; the name has "/" between
+// levels. It returns the new folder's id.
+func (m methods) CreateFolder(account, name string) (int64, *dbus.Error) {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	id, err := m.s.db.AccountID(ctx, account)
+	if err != nil {
+		return 0, dbusError(fmt.Errorf("account %s: %w", account, imapsync.ErrNotFound))
+	}
+	b := m.s.backends[id]
+	if b == nil {
+		return 0, dbusError(fmt.Errorf("account %s isn't configured: %w", account, imapsync.ErrNotFound))
+	}
+	folderID, err := b.CreateFolder(ctx, name)
+	return folderID, dbusError(err)
+}
+
+// DeleteFolder deletes a folder and the mail in it.
+func (m methods) DeleteFolder(folderID int64) *dbus.Error {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	b, err := m.s.backendFor(ctx, folderID)
+	if err != nil {
+		return dbusError(err)
+	}
+	return dbusError(b.DeleteFolder(ctx, folderID))
 }

@@ -39,6 +39,8 @@ type daemon interface {
 	SaveDraft(ctx context.Context, account string, raw []byte) error
 	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
 	MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error
+	CreateFolder(ctx context.Context, account, name string) (int64, error)
+	DeleteFolder(ctx context.Context, folderID int64) error
 }
 
 type mode int

@@ -320,12 +320,17 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 	if u.searching {
 		children = append(children, layout.Rigid(u.divider), layout.Rigid(u.searchBar))
 	}
+	if u.pane.open && u.pane.naming {
+		children = append(children, layout.Rigid(u.divider), layout.Rigid(u.nameBar))
+	}
 	hints := listHints
 	switch {
+	case u.pane.open && u.pane.naming:
+		hints = "Enter creates the folder · Esc cancels"
 	case u.pane.open && len(u.pane.moving) > 0:
-		hints = "Move " + conversations(len(u.pane.moving)) + " to: j/k choose a folder · Enter or → moves · Esc cancels"
+		hints = "Move " + conversations(len(u.pane.moving)) + " to: j/k choose a folder · Enter or → moves · n new folder · Esc cancels"
 	case u.pane.open:
-		hints = "j/k preview a folder · Enter or → open and sync it · Esc, c or ← back to " + u.pane.origin.Name
+		hints = "j/k preview a folder · Enter or → open and sync it · n new folder · d delete · Esc, c or ← back to " + u.pane.origin.Name
 	case u.similar != nil:
 		hints = fmt.Sprintf("Look-alikes of the junked mail, %d marked · s junks the marked · d trashes them · Space unmarks · Esc back to all", u.markCount())
 	case u.markCount() > 0:

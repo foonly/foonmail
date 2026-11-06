@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -65,6 +66,14 @@ func (b *fakeBackend) MoveMessages(_ context.Context, folderID int64, uids []uin
 
 func (b *fakeBackend) AppendDraft(_ context.Context, raw []byte) error {
 	return b.record("draft")
+}
+
+func (b *fakeBackend) CreateFolder(_ context.Context, name string) (int64, error) {
+	return 77, b.record("create " + name)
+}
+
+func (b *fakeBackend) DeleteFolder(_ context.Context, folderID int64) error {
+	return b.record(fmt.Sprint("delete folder ", folderID))
 }
 
 func (b *fakeBackend) SetFlags(_ context.Context, folderID int64, uids []uint32, add, remove []string) error {
@@ -248,6 +257,25 @@ func TestServiceDrafts(t *testing.T) {
 		t.Errorf("backend calls = %v", got)
 	}
 	if err := e.client.SaveDraft(ctx, "nobody", []byte("x")); !errors.Is(err, rpc.ErrNotFound) {
+		t.Errorf("unknown account: err = %v", err)
+	}
+}
+
+func TestServiceFolders(t *testing.T) {
+	e := newServiceEnv(t)
+	ctx := callCtx(t)
+	id, err := e.client.CreateFolder(ctx, "home", "Clients/Acme")
+	if err != nil || id != 77 {
+		t.Errorf("CreateFolder = %d, %v", id, err)
+	}
+	if err := e.client.DeleteFolder(ctx, e.inbox); err != nil {
+		t.Errorf("DeleteFolder: %v", err)
+	}
+	want := []string{"create Clients/Acme", fmt.Sprint("delete folder ", e.inbox)}
+	if !slices.Equal(e.backend.recorded(), want) {
+		t.Errorf("backend calls = %v", e.backend.recorded())
+	}
+	if _, err := e.client.CreateFolder(ctx, "nobody", "X"); !errors.Is(err, rpc.ErrNotFound) {
 		t.Errorf("unknown account: err = %v", err)
 	}
 }

@@ -700,3 +700,55 @@ func TestMoveMessagesKeepsTheCachedBody(t *testing.T) {
 		t.Errorf("unknown destination: err = %v", err)
 	}
 }
+
+func TestCreateAndDeleteFolder(t *testing.T) {
+	e := newEnv(t, "Sent")
+	e.start()
+	defer e.stop()
+	e.eventually("Sent listed", func() bool { _, ok := e.folder("Sent"); return ok })
+
+	id, err := e.syncer.CreateFolder(reqCtx(t), "Clients/Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, ok := e.folder("Clients/Acme") // the test server's separator is "/"
+	if !ok || f.ID != id || !e.folderChangedFor(id) {
+		t.Fatalf("created folder: %+v %v, id %d", f, ok, id)
+	}
+	boxes, _ := e.phone.List("", "*", nil).Collect()
+	found := false
+	for _, b := range boxes {
+		found = found || b.Mailbox == "Clients/Acme"
+	}
+	if !found {
+		t.Errorf("not on the server: %+v", boxes)
+	}
+	for _, bad := range []string{"Clients/Acme", "inbox", "a//b", " "} {
+		if _, err := e.syncer.CreateFolder(reqCtx(t), bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("CreateFolder(%q): err = %v", bad, err)
+		}
+	}
+
+	if err := e.syncer.DeleteFolder(reqCtx(t), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.folder("Clients/Acme"); ok {
+		t.Error("deleted folder still cached")
+	}
+	inbox, _ := e.folder("INBOX")
+	if err := e.syncer.DeleteFolder(reqCtx(t), inbox.ID); !errors.Is(err, ErrInvalid) {
+		t.Errorf("deleting INBOX: err = %v", err)
+	}
+}
+
+func TestServerName(t *testing.T) {
+	dot := []cache.Folder{{Name: "INBOX", Delimiter: "."}, {Name: "Archives", Delimiter: "."}}
+	for in, want := range map[string]string{"Clients/Acme": "Clients.Acme", " Receipts ": "Receipts", "INBOX/Github": "INBOX.Github"} {
+		if got, err := serverName(in, dot); got != want || err != nil {
+			t.Errorf("serverName(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := serverName("archives", dot); !errors.Is(err, ErrInvalid) {
+		t.Errorf("existing name: err = %v", err)
+	}
+}

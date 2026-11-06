@@ -258,3 +258,16 @@ func (c *Client) DeleteMessages(ctx context.Context, folderID int64, uids []uint
 func (c *Client) MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error {
 	return mapError(c.call(ctx, "MoveMessages", folderID, uids, dest).Err)
 }
+
+// CreateFolder makes a folder in an account, with "/" between levels of
+// the name, and returns its id.
+func (c *Client) CreateFolder(ctx context.Context, account, name string) (int64, error) {
+	var id int64
+	err := c.call(ctx, "CreateFolder", account, name).Store(&id)
+	return id, mapError(err)
+}
+
+// DeleteFolder deletes a folder and the mail in it from the server.
+func (c *Client) DeleteFolder(ctx context.Context, folderID int64) error {
+	return mapError(c.call(ctx, "DeleteFolder", folderID).Err)
+}

@@ -28,8 +28,11 @@ func (h *harness) typeText(s string) {
 // caretRange is the selection of the focused compose field, where typed
 // text goes.
 func (h *harness) caretRange() key.Range {
-	c := h.u.comp
-	for _, f := range []*widget.Editor{&c.from, &c.to, &c.cc, &c.bcc, &c.subject, &c.body} {
+	fields := []*widget.Editor{&h.u.pane.name, &h.u.search}
+	if c := h.u.comp; c != nil {
+		fields = append(fields, &c.from, &c.to, &c.cc, &c.bcc, &c.subject, &c.body)
+	}
+	for _, f := range fields {
 		if h.r.Source().Focused(f) {
 			s, e := f.Selection()
 			return key.Range{Start: s, End: e}
