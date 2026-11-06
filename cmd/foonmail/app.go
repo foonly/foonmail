@@ -134,6 +134,8 @@ type ui struct {
 	undoDelay     time.Duration      // how long sent mail can be taken back
 	marks         map[string]bool    // marked conversations, by key
 	similar       *similarSet        // the list narrowed to look-alikes of junked mail
+	onlyUnread    bool               // u: the list shows unread conversations only
+	wasUnread     map[string]bool    // conversations shown as unread since u, kept when read
 	markBase      map[string]bool    // the marks before the current Shift range
 	anchor        int                // where the current Shift range started; -1 for none
 	moving        map[movingKey]bool // messages being moved or deleted, kept out of the list
@@ -247,6 +249,15 @@ func (u *ui) applyFilter(keep string) {
 				}
 			}
 		}
+	}
+	if u.onlyUnread && u.similar == nil {
+		u.view = slices.DeleteFunc(u.view, func(i int) bool {
+			c := &u.convs[i]
+			if c.unread > 0 {
+				u.wasUnread[c.key] = true
+			}
+			return !u.wasUnread[c.key]
+		})
 	}
 	u.sel = 0
 	for vi, i := range u.view {
@@ -458,6 +469,7 @@ func (u *ui) showFolder(f cache.Folder) {
 	}
 	u.folder = f
 	u.similar = nil
+	clear(u.wasUnread)
 	u.clearMarks()
 	u.search.SetText("")
 	u.searching = false
@@ -555,4 +567,21 @@ func xdgOpen(url string) error {
 	}
 	go cmd.Wait() // reap it
 	return nil
+}
+
+// toggleUnreadOnly switches the list between all conversations and the
+// unread ones. One read while the filter is on stays in the list until it
+// is turned off, so rows don't vanish while you read your way down.
+func (u *ui) toggleUnreadOnly() {
+	keep := ""
+	if c := u.current(); c != nil {
+		keep = c.key
+	}
+	u.endSimilar()
+	u.onlyUnread = !u.onlyUnread
+	u.wasUnread = map[string]bool{}
+	u.applyFilter(keep)
+	if u.onlyUnread && len(u.view) == 0 {
+		u.notice = "No unread conversations in " + u.folder.Name
+	}
 }

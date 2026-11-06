@@ -147,6 +147,7 @@ The bottom line of the window always shows the keys for what you're doing.
 | Shift+j/k, Space | mark a range / mark one; a, s, d, v and N then act on all marked (Esc clears) |
 | N | mark read or unread |
 | after s | the list shows the other conversations that look like the junked mail (same sender, mostly the same subject), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
+| u | only unread conversations (ones you read stay until u or Esc turns it off) |
 | / | filter |
 
 | Reading a conversation | |

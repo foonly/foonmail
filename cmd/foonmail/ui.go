@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · / filter"
+	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · u unread only · / filter"
 	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
 )
 
@@ -134,6 +134,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: key.NameReturn},
 			key.Filter{Focus: t, Name: key.NameEnter},
 			key.Filter{Focus: t, Name: "N", Required: key.ModShift},
+			key.Filter{Focus: t, Name: "U"},
 			key.Filter{Focus: t, Name: "C"},
 			key.Filter{Focus: t, Name: key.NameLeftArrow},
 			key.Filter{Focus: t, Name: "/", Optional: key.ModShift},
@@ -192,6 +193,8 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.openSelected()
 		case "N":
 			u.toggleRead()
+		case "U":
+			u.toggleUnreadOnly()
 		case "C", key.NameLeftArrow:
 			u.openPane()
 		case "A":
@@ -222,6 +225,8 @@ func (u *ui) updateList(gtx layout.Context) {
 				u.notice = ""
 			case u.searching:
 				u.clearFilter()
+			case u.onlyUnread:
+				u.toggleUnreadOnly()
 			}
 		case "Q":
 			if u.w != nil {
@@ -343,6 +348,11 @@ func (u *ui) header(gtx layout.Context) layout.Dimensions {
 		parts = append(parts, fmt.Sprintf("%d like “%s”", len(u.view), u.similar.subject))
 	case u.searching && u.search.Len() > 0:
 		parts = append(parts, fmt.Sprintf("%d of %d conversations match", len(u.view), len(u.convs)))
+		if u.onlyUnread {
+			parts = append(parts, "unread only")
+		}
+	case u.onlyUnread:
+		parts = append(parts, fmt.Sprintf("%d unread of %d conversations", len(u.view), len(u.convs)))
 	default:
 		parts = append(parts, fmt.Sprintf("%d conversations", len(u.convs)), fmt.Sprintf("%d unread", unreadCount))
 	}
@@ -411,6 +421,8 @@ func (u *ui) listArea(gtx layout.Context) layout.Dimensions {
 		msg := "This folder is empty."
 		if u.searching && u.search.Len() > 0 {
 			msg = "No conversations match."
+		} else if u.onlyUnread {
+			msg = "No unread conversations. u shows them all."
 		} else if u.folder.UIDValidity == 0 {
 			msg = "This folder hasn't been synced yet."
 		}
