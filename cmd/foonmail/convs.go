@@ -23,13 +23,19 @@ type conversation struct {
 	unread   int // unread members in the current folder
 	flagged  bool
 	inFolder int // members in the current folder
+
+	// copies are further copies, in the current folder, of members shown
+	// once: the same message delivered more than once, as to several of
+	// your addresses. Reading, moving and deleting take them along, and
+	// an unread copy makes its message unread.
+	copies []cache.Entry
 }
 
 // folderUIDs are the UIDs of the members in folderID, optionally only
 // unread ones.
 func (c *conversation) folderUIDs(folderID int64, onlyUnread bool) []uint32 {
 	var out []uint32
-	for _, m := range c.members {
+	for _, m := range slices.Concat(c.members, c.copies) {
 		if m.FolderID == folderID && (!onlyUnread || unread(m.Summary)) {
 			out = append(out, m.UID)
 		}
@@ -56,22 +62,31 @@ func buildConversations(entries []cache.Entry, folderID int64, own []string) []c
 		// the threading headers already tie them together, can't merge
 		// unrelated mail.
 		byID := map[string]cache.Entry{}
+		var copies []cache.Entry
+		unreadCopy := map[string]bool{}
 		for _, i := range group {
 			e := entries[i]
 			k := e.MessageID
 			if k == "" {
 				k = fmt.Sprintf("#%d", e.ID)
 			}
-			if prev, ok := byID[k]; !ok || (prev.FolderID != folderID && e.FolderID == folderID) {
+			prev, ok := byID[k]
+			switch {
+			case !ok || (prev.FolderID != folderID && e.FolderID == folderID):
 				byID[k] = e
+			case prev.FolderID == folderID && e.FolderID == folderID:
+				copies = append(copies, e)
+				if unread(e.Summary) {
+					unreadCopy[k] = true
+				}
 			}
 		}
-		c := conversation{}
-		for _, e := range byID {
+		c := conversation{copies: copies}
+		for k, e := range byID {
 			c.members = append(c.members, e)
 			if e.FolderID == folderID {
 				c.inFolder++
-				if unread(e.Summary) {
+				if unread(e.Summary) || unreadCopy[k] {
 					c.unread++
 				}
 				if flagged(e.Summary) {

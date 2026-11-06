@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/introspect"
@@ -110,7 +111,7 @@ func (u *ui) showMessage(folderID int64, uid uint32) {
 		u.reload() // the message may be newer than the list
 	}
 	for vi, i := range u.view {
-		for _, m := range u.convs[i].members {
+		for _, m := range slices.Concat(u.convs[i].members, u.convs[i].copies) {
 			if m.FolderID == folderID && m.UID == uid {
 				u.sel = vi
 				u.ensureVisible()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -185,5 +186,29 @@ func TestPeopleKeepWholeNames(t *testing.T) {
 		[]string{"me@example.org"})
 	if got != "me, bob@example.com, The Steam Team" {
 		t.Errorf("people = %q", got)
+	}
+}
+
+// The same message delivered three times (to several aliases) shows once,
+// is unread while any copy is, and reading or moving it takes every copy.
+func TestDuplicateDeliveriesAreOneMessage(t *testing.T) {
+	entries := []cache.Entry{
+		entry(1, 1, 31192, "r@google.com", "", "noreply-dmarc@google.com", "Report domain", 1, `\Seen`),
+		entry(2, 1, 31191, "r@google.com", "", "noreply-dmarc@google.com", "Report domain", 1),
+		entry(3, 1, 31190, "r@google.com", "", "noreply-dmarc@google.com", "Report domain", 1, `\Seen`),
+	}
+	convs := buildConversations(entries, 1, nil)
+	if len(convs) != 1 || len(convs[0].members) != 1 {
+		t.Fatalf("got %d conversations", len(convs))
+	}
+	c := convs[0]
+	if c.unread != 1 {
+		t.Errorf("unread = %d, want 1", c.unread)
+	}
+	if got := c.folderUIDs(1, true); !slices.Equal(got, []uint32{31191}) {
+		t.Errorf("unread UIDs %v", got)
+	}
+	if got := c.folderUIDs(1, false); len(got) != 3 {
+		t.Errorf("all UIDs %v", got)
 	}
 }
