@@ -133,6 +133,7 @@ type ui struct {
 	dataDir       string
 	undoDelay     time.Duration      // how long sent mail can be taken back
 	marks         map[string]bool    // marked conversations, by key
+	similar       *similarSet        // the list narrowed to look-alikes of junked mail
 	markBase      map[string]bool    // the marks before the current Shift range
 	anchor        int                // where the current Shift range started; -1 for none
 	moving        map[movingKey]bool // messages being moved or deleted, kept out of the list
@@ -212,12 +213,25 @@ func (u *ui) reload() {
 // conversation with key keep selected if it is still shown.
 func (u *ui) applyFilter(keep string) {
 	u.view = u.view[:0]
+	if u.similar != nil {
+		for i, c := range u.convs {
+			if u.similar.keys[c.key] {
+				u.view = append(u.view, i)
+			}
+		}
+		if len(u.view) == 0 { // all dealt with: back to the whole list
+			u.similar = nil
+			u.clearMarks()
+		}
+	}
 	words := strings.Fields(u.search.Text())
-	if !u.searching || len(words) == 0 {
+	switch {
+	case len(u.view) > 0:
+	case !u.searching || len(words) == 0:
 		for i := range u.convs {
 			u.view = append(u.view, i)
 		}
-	} else {
+	default:
 		hits, err := u.db.Search(context.Background(), u.accountID, u.folder.ID, words, 5000)
 		if err != nil {
 			u.notice = "Search failed: " + err.Error()
@@ -444,6 +458,7 @@ func (u *ui) showFolder(f cache.Folder) {
 		}
 	}
 	u.folder = f
+	u.similar = nil
 	u.clearMarks()
 	u.search.SetText("")
 	u.searching = false

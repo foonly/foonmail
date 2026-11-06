@@ -48,6 +48,9 @@ There is also **foonmailctl**, a command-line tool for the daemon.
 - Archive, junk, trash or move to any folder with one key, for one
   conversation or several marked ones. A folder pane lists all folders,
   with the special ones (Drafts, Sent, Archive, Junk, Trash) first.
+- Junking a message brings up the rest of the spam run: the conversations
+  in the folder from the same sender (or the same name with a number
+  added) with mostly the same subject, ready to junk or trash in one go.
 - A tray icon (StatusNotifierItem) that lights up for new mail, and
   notifications that open the message when clicked.
 
@@ -143,6 +146,7 @@ The bottom line of the window always shows the keys for what you're doing.
 | v | move to a folder (the folder pane opens to choose one) |
 | Shift+j/k, Space | mark a range / mark one; a, s, d, v and N then act on all marked (Esc clears) |
 | N | mark read or unread |
+| after s | the list shows the other conversations that look like the junked mail (same sender, mostly the same subject), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
 | / | filter |
 
 | Reading a conversation | |

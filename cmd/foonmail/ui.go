@@ -209,10 +209,14 @@ func (u *ui) updateList(gtx layout.Context) {
 		case "F":
 			u.replyFromList(kindForward)
 		case "/":
+			u.endSimilar()
 			u.searching = true
 			u.focusReq = &u.search
 		case key.NameEscape:
 			switch {
+			case u.similar != nil:
+				u.endSimilar()
+				u.notice = ""
 			case len(u.marks) > 0:
 				u.clearMarks()
 				u.notice = ""
@@ -317,6 +321,8 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 		hints = "Move " + conversations(len(u.pane.moving)) + " to: j/k choose a folder · Enter or → moves · Esc cancels"
 	case u.pane.open:
 		hints = "j/k preview a folder · Enter or → open and sync it · Esc, c or ← back to " + u.pane.origin.Name
+	case u.similar != nil:
+		hints = fmt.Sprintf("Look-alikes of the junked mail, %d marked · s junks the marked · d trashes them · Space unmarks · Esc back to all", u.markCount())
 	case u.markCount() > 0:
 		hints = fmt.Sprintf("%d marked · a archive · s junk · d trash · v move to · N read/unread · Space or Shift+j/k mark more · Esc clears", u.markCount())
 	}
@@ -332,9 +338,12 @@ func (u *ui) header(gtx layout.Context) layout.Dimensions {
 		}
 	}
 	parts := []string{u.account.Name, u.folder.Name}
-	if u.searching && u.search.Len() > 0 {
+	switch {
+	case u.similar != nil:
+		parts = append(parts, fmt.Sprintf("%d like “%s”", len(u.view), u.similar.subject))
+	case u.searching && u.search.Len() > 0:
 		parts = append(parts, fmt.Sprintf("%d of %d conversations match", len(u.view), len(u.convs)))
-	} else {
+	default:
 		parts = append(parts, fmt.Sprintf("%d conversations", len(u.convs)), fmt.Sprintf("%d unread", unreadCount))
 	}
 	switch {

@@ -87,7 +87,16 @@ func (u *ui) moveConversation(t moveTarget) {
 		u.notice = "This account has no " + targetNames[t] + " folder"
 		return
 	}
+	var similar map[string]bool
+	subject := convs[0].subject
+	if t == toJunk && u.similar == nil {
+		similar = u.findSimilar(convs)
+	}
 	u.moveConvs(convs, dest, name, t == toTrash)
+	if len(similar) > 0 {
+		u.showSimilar(subject, similar)
+		u.notice += fmt.Sprintf(". %d more look similar: s junks the marked ones too", len(similar))
+	}
 }
 
 // moveConvs moves conversations' messages in this folder to dest, or
