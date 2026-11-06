@@ -53,6 +53,10 @@ func TestJunkFindsLookAlikes(t *testing.T) {
 	h.u.reload()
 	h.u.sel = 0
 	h.frame()
+	// A filter is on; it is back once the look-alikes are left.
+	h.u.searching = true
+	h.u.search.SetText("silmiesi")
+	h.u.applyFilter("")
 
 	h.press("S")
 	if h.u.similar == nil || h.u.markCount() != 2 || len(h.u.view) != 2 {
@@ -70,8 +74,8 @@ func TestJunkFindsLookAlikes(t *testing.T) {
 		t.Fatalf("after junking the marked: similar %v, %s", h.u.similar, h.subjects())
 	}
 	h.press(key.NameEscape)
-	if h.u.similar != nil || len(h.u.view) != 4 { // Driving Glasses #1, receipt, Kahvi?, Invoice
-		t.Errorf("after Esc: %s", h.subjects())
+	if h.u.similar != nil || !h.u.searching || h.u.search.Text() != "silmiesi" || len(h.u.view) != 1 { // Driving Glasses #1
+		t.Errorf("after Esc: filter %v %q, %s", h.u.searching, h.u.search.Text(), h.subjects())
 	}
 	if c := h.u.current(); c == nil || c.key != "spam1" {
 		t.Errorf("back in the list at %v, want the row after the junked one", c)

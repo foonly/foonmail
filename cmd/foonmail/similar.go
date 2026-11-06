@@ -22,6 +22,10 @@ type similarSet struct {
 	// is still there.
 	order []string
 	sel   int
+
+	// The / filter that was on, to put back.
+	searching bool
+	search    string
 }
 
 // returnKey is the conversation to select back in the whole list.
@@ -45,6 +49,8 @@ func (u *ui) leaveSimilar() string {
 	s := u.similar
 	u.similar = nil
 	u.clearMarks()
+	u.searching = s.searching
+	u.search.SetText(s.search)
 	have := map[string]bool{}
 	for _, c := range u.convs {
 		have[c.key] = true
@@ -159,7 +165,8 @@ func (u *ui) showSimilar(subject string, keys map[string]bool) {
 	for i, ci := range u.view {
 		order[i] = u.convs[ci].key
 	}
-	u.similar = &similarSet{subject: subject, keys: keys, order: order, sel: u.sel}
+	u.similar = &similarSet{subject: subject, keys: keys, order: order, sel: u.sel,
+		searching: u.searching, search: u.search.Text()}
 	u.clearMarks()
 	for k := range keys {
 		u.marks[k] = true
