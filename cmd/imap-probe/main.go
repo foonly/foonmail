@@ -7,6 +7,9 @@
 //     (such as reading a message on the phone) and expunges
 //   - after a disconnect or resume from sleep, what changed in between
 //
+// With -search "words" it instead times a header search and a full-text
+// search in every folder but Trash and Junk, then exits.
+//
 // The server and login come from the foonmail config (-account picks one);
 // the password from the Secret Service keyring, as for foonmaild.
 package main
@@ -20,6 +23,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +38,7 @@ func main() {
 	accountName := flag.String("account", "", "account to probe (default: the first)")
 	mailbox := flag.String("mailbox", "INBOX", "mailbox to watch")
 	check := flag.Duration("check", 5*time.Minute, "how often to verify the connection is alive")
+	search := flag.String("search", "", "time a search for these words in every folder, then exit")
 	debug := flag.Bool("debug", false, "print the IMAP protocol to stderr, with credentials redacted")
 	flag.Parse()
 
@@ -69,6 +74,13 @@ func main() {
 		p.debug = newRedactWriter(os.Stderr)
 	} else {
 		p.debug = io.Discard
+	}
+
+	if *search != "" {
+		if err := p.searchProbe(strings.Fields(*search)); err != nil {
+			out.Fatal(err)
+		}
+		return
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
