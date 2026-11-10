@@ -46,8 +46,8 @@ func (ss *searches) stop(id int64) {
 }
 
 // SearchServer starts a server search of an account for messages with
-// every one of words and returns its id at once. Results arrive as
-// SearchFound signals, then one SearchDone.
+// every one of words and returns its id at once. SearchProgress, SearchFound
+// and SearchSkipped signals follow, then one SearchDone.
 func (m methods) SearchServer(account string, words []string) (int64, *dbus.Error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
@@ -65,9 +65,16 @@ func (m methods) SearchServer(account string, words []string) (int64, *dbus.Erro
 		defer m.s.searches.stop(id)
 		started := time.Now()
 		n := 0
-		err := b.Search(sctx, words, func(f imapsync.Found) {
-			n += len(f.UIDs)
-			m.s.emit(rpc.SignalSearchFound, id, f.FolderID, f.UIDs, f.InBody)
+		err := b.Search(sctx, words, func(ev imapsync.SearchEvent) {
+			switch ev := ev.(type) {
+			case imapsync.Progress:
+				m.s.emit(rpc.SignalSearchProgress, id, ev.FolderID, ev.Folder, int32(ev.N), int32(ev.Of), ev.Body)
+			case imapsync.Found:
+				n += len(ev.UIDs)
+				m.s.emit(rpc.SignalSearchFound, id, ev.FolderID, ev.UIDs, ev.InBody)
+			case imapsync.Skipped:
+				m.s.emit(rpc.SignalSearchSkipped, id, ev.FolderID, ev.Folder, ev.Body, ev.Reason)
+			}
 		})
 		msg := ""
 		if err != nil {

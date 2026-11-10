@@ -1,6 +1,7 @@
 package imapsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -819,8 +820,24 @@ func TestSearch(t *testing.T) {
 	e.eventually("INBOX synced", func() bool { return len(e.uids("INBOX")) == 1 })
 
 	var found []Found
-	if err := e.syncer.Search(reqCtx(t), []string{"invoice"}, func(f Found) { found = append(found, f) }); err != nil {
+	var progress []string
+	err := e.syncer.Search(reqCtx(t), []string{"invoice"}, func(ev SearchEvent) {
+		switch ev := ev.(type) {
+		case Found:
+			found = append(found, ev)
+		case Progress:
+			progress = append(progress, fmt.Sprintf("%s %d/%d %v", ev.Folder, ev.N, ev.Of, ev.Body))
+		case Skipped:
+			t.Errorf("skipped %v", ev)
+		}
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantProgress := []string{"INBOX 1/3 false", "Sent 2/3 false", "Archive 3/3 false",
+		"INBOX 1/3 true", "Sent 2/3 true", "Archive 3/3 true"}
+	if !slices.Equal(progress, wantProgress) {
+		t.Errorf("progress %q, want %q", progress, wantProgress)
 	}
 	inbox, _ := e.folder("INBOX")
 	archive, _ := e.folder("Archive")
@@ -855,7 +872,104 @@ func TestSearchCancel(t *testing.T) {
 	defer e.stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := e.syncer.Search(ctx, []string{"invoice"}, func(Found) { t.Error("found after cancel") }); err == nil {
+	if err := e.syncer.Search(ctx, []string{"invoice"}, func(ev SearchEvent) {
+		if _, ok := ev.(Found); ok {
+			t.Error("found after cancel")
+		}
+	}); err == nil {
 		t.Error("a cancelled search returned no error")
+	}
+}
+
+// stallConn swallows the UID SEARCH sent after selecting one mailbox, so
+// the server never answers it, as when Dovecot waits for its indexer. It
+// passes commands on a line at a time, as the client may write one in
+// pieces.
+type stallConn struct {
+	net.Conn
+	mailbox  string
+	selected bool
+	line     []byte
+}
+
+func (c *stallConn) Write(p []byte) (int, error) {
+	c.line = append(c.line, p...)
+	for {
+		i := bytes.Index(c.line, []byte("\r\n"))
+		if i < 0 {
+			return len(p), nil
+		}
+		line := c.line[:i+2]
+		c.line = c.line[i+2:]
+		switch {
+		case bytes.Contains(line, []byte("EXAMINE ")):
+			c.selected = bytes.Contains(line, []byte(c.mailbox))
+		case c.selected && bytes.Contains(line, []byte("UID SEARCH")):
+			continue
+		}
+		if _, err := c.Conn.Write(line); err != nil {
+			return 0, err
+		}
+	}
+}
+
+func TestSearchSkipsAFolderThatDoesNotAnswer(t *testing.T) {
+	e := newEnv(t, "Sent", "Archive")
+	e.appendTo("INBOX", "Invoice for March")
+	e.appendTo("Archive", "Invoice for April")
+	e.appendTo("Sent", "Invoice sent")
+	e.start()
+	defer e.stop()
+	e.eventually("folders listed", func() bool {
+		_, archive := e.folder("Archive")
+		_, sent := e.folder("Sent")
+		return archive && sent
+	})
+	// Gone on the server but still in the cache: SELECT fails.
+	if _, err := e.db.EnsureFolder(context.Background(), e.syncer.AccountID(), "Vanished"); err != nil {
+		t.Fatal(err)
+	}
+	e.syncer.opts.Dial = func(srv config.Server, opts *imapclient.Options) (*imapclient.Client, error) {
+		conn, err := net.Dial("tcp", srv.Address())
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(&stallConn{Conn: conn, mailbox: "Sent"}, opts), nil
+	}
+	oldHeader, oldBody := headerSearchTimeout, bodySearchTimeout
+	headerSearchTimeout, bodySearchTimeout = 300*time.Millisecond, 300*time.Millisecond
+	defer func() { headerSearchTimeout, bodySearchTimeout = oldHeader, oldBody }()
+
+	var got []string
+	err := e.syncer.Search(reqCtx(t), []string{"invoice"}, func(ev SearchEvent) {
+		switch ev := ev.(type) {
+		case Found:
+			f, _ := e.db.FolderByID(context.Background(), ev.FolderID)
+			got = append(got, fmt.Sprintf("found %s %v %v", f.Name, ev.UIDs, ev.InBody))
+		case Skipped:
+			got = append(got, fmt.Sprintf("skipped %s %v: %s", ev.Folder, ev.Body, ev.Reason))
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sent never answers: it is skipped in both passes, and the search
+	// goes on with the next folder on a new connection. Vanished fails.
+	// (The test server has no SPECIAL-USE, so Sent sorts by name.)
+	want := []string{
+		"found INBOX [1] false",
+		"skipped Vanished false: select Vanished",
+		"skipped Sent false: no answer in 300ms",
+		"found Archive [1] false",
+		"skipped Vanished true: select Vanished",
+		"skipped Sent true: no answer in 300ms",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("events %q", got)
+	}
+	for i, w := range want {
+		if !strings.HasPrefix(got[i], w) {
+			t.Errorf("event %d = %q, want %q…", i, got[i], w)
+		}
 	}
 }

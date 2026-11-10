@@ -196,6 +196,10 @@ func (u *ui) follow(events <-chan rpc.Event) {
 			u.refreshStatus()
 		case rpc.SearchFound:
 			u.post(func() { u.searchFound(ev) })
+		case rpc.SearchProgress:
+			u.post(func() { u.searchProgress(ev) })
+		case rpc.SearchSkipped:
+			u.post(func() { u.searchSkipped(ev) })
 		case rpc.SearchDone:
 			u.post(func() { u.searchDone(ev) })
 		}

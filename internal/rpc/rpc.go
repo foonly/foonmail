@@ -24,7 +24,9 @@
 //	FolderChanged(folder x)   the cache's copy of a folder changed
 //	StatusChanged()           call Status again
 //	OutboxChanged()           call Outbox again
+//	SearchProgress(search x, folder x, name s, n i, of i, inBody b)  searching the n-th folder of of now
 //	SearchFound(search x, folder x, uids au, inBody b)  results, already in the cache
+//	SearchSkipped(search x, folder x, name s, inBody b, reason s)  a folder left out: no answer in time, or an error
 //	SearchDone(search x, error s)                       the search ended; error is "" when it went fine
 //
 // Folders are cache folder ids; messages are cache message ids.
@@ -43,11 +45,13 @@ const (
 	Path      = dbus.ObjectPath("/io/github/foonly/Foonmail")
 	Interface = "io.github.foonly.Foonmail1"
 
-	SignalFolderChanged = Interface + ".FolderChanged"
-	SignalStatusChanged = Interface + ".StatusChanged"
-	SignalOutboxChanged = Interface + ".OutboxChanged"
-	SignalSearchFound   = Interface + ".SearchFound"
-	SignalSearchDone    = Interface + ".SearchDone"
+	SignalFolderChanged  = Interface + ".FolderChanged"
+	SignalStatusChanged  = Interface + ".StatusChanged"
+	SignalOutboxChanged  = Interface + ".OutboxChanged"
+	SignalSearchFound    = Interface + ".SearchFound"
+	SignalSearchProgress = Interface + ".SearchProgress"
+	SignalSearchSkipped  = Interface + ".SearchSkipped"
+	SignalSearchDone     = Interface + ".SearchDone"
 
 	// D-Bus error names, mapped to the Go errors below.
 	ErrNameOffline  = Interface + ".Error.Offline"
@@ -178,8 +182,29 @@ type SearchDone struct {
 	Err    string
 }
 
-func (SearchFound) isEvent() {}
-func (SearchDone) isEvent()  {}
+// SearchProgress says which folder a server search is on: the N-th of Of,
+// in the header pass or (InBody) the body pass.
+type SearchProgress struct {
+	Search   int64
+	FolderID int64
+	Folder   string
+	N, Of    int32
+	InBody   bool
+}
+
+// SearchSkipped is a folder a server search left out, and why.
+type SearchSkipped struct {
+	Search   int64
+	FolderID int64
+	Folder   string
+	InBody   bool
+	Reason   string
+}
+
+func (SearchProgress) isEvent() {}
+func (SearchSkipped) isEvent()  {}
+func (SearchFound) isEvent()    {}
+func (SearchDone) isEvent()     {}
 
 func (FolderChanged) isEvent() {}
 func (StatusChanged) isEvent() {}
@@ -211,6 +236,16 @@ func (c *Client) Subscribe() (events <-chan Event, stop func(), err error) {
 			case SignalSearchFound:
 				var ev SearchFound
 				if dbus.Store(s.Body, &ev.Search, &ev.FolderID, &ev.UIDs, &ev.InBody) == nil {
+					out <- ev
+				}
+			case SignalSearchProgress:
+				var ev SearchProgress
+				if dbus.Store(s.Body, &ev.Search, &ev.FolderID, &ev.Folder, &ev.N, &ev.Of, &ev.InBody) == nil {
+					out <- ev
+				}
+			case SignalSearchSkipped:
+				var ev SearchSkipped
+				if dbus.Store(s.Body, &ev.Search, &ev.FolderID, &ev.Folder, &ev.InBody, &ev.Reason) == nil {
 					out <- ev
 				}
 			case SignalSearchDone:

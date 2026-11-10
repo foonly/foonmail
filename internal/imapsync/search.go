@@ -3,15 +3,30 @@ package imapsync
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 
 	"foonmail/internal/cache"
 )
+
+// SearchEvent is what Search reports as it goes: Progress, Found or
+// Skipped.
+type SearchEvent interface{ isSearchEvent() }
+
+// Progress says which folder is being searched now: the N-th of Of, in
+// the header pass or the body pass.
+type Progress struct {
+	FolderID int64
+	Folder   string
+	N, Of    int
+	Body     bool
+}
 
 // Found is a batch of server search results: messages in one folder,
 // stored in the cache, so they can be listed and opened like any other.
@@ -21,17 +36,41 @@ type Found struct {
 	InBody   bool // found by the body pass: the words aren't in From, To or Subject
 }
 
+// Skipped is a folder left out of a pass, because the server didn't
+// answer in time or refused.
+type Skipped struct {
+	FolderID int64
+	Folder   string
+	Body     bool
+	Reason   string
+}
+
+func (Progress) isSearchEvent() {}
+func (Found) isSearchEvent()    {}
+func (Skipped) isSearchEvent()  {}
+
+// How long one folder's search may take before it is skipped. A server
+// with a full-text index answers in well under a second; without one, a
+// body search reads every message, about 5 ms each. Dovecot also makes a
+// search wait until new mail is indexed, which can take long when its
+// indexers are busy elsewhere.
+var (
+	headerSearchTimeout = 30 * time.Second
+	bodySearchTimeout   = 60 * time.Second
+)
+
 // Search looks for messages with all of words on the server, in every
 // folder but Trash and Junk (on Gmail, in All Mail only, which holds the
 // rest). It runs on a connection of its own, so syncing goes on meanwhile.
 //
 // It searches From, To and Subject in every folder first, which is quick,
-// then the whole message (TEXT) folder by folder, which without a
-// full-text index on the server means reading every message. found is
-// called with each folder's results as they come, after they are in the
-// cache; a folder's body results leave out its header results. Search
-// returns when done or when ctx is cancelled.
-func (s *Syncer) Search(ctx context.Context, words []string, found func(Found)) error {
+// then the whole message (TEXT) folder by folder. report gets a Progress
+// before each folder, a Found with each folder's results once they are in
+// the cache (a folder's body results leave out its header results), and a
+// Skipped for a folder that took too long or failed; the search goes on
+// with the next, on a new connection if the old one was dropped. Search
+// returns when done, when ctx is cancelled, or when it can't connect.
+func (s *Syncer) Search(ctx context.Context, words []string, report func(SearchEvent)) error {
 	if len(words) == 0 {
 		return nil
 	}
@@ -39,45 +78,70 @@ func (s *Syncer) Search(ctx context.Context, words []string, found func(Found)) 
 	if err != nil {
 		return err
 	}
-	c, err := s.connect(nil)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrOffline, err)
+	var c *imapclient.Client
+	stop := func() bool { return false }
+	drop := func() {
+		if c != nil {
+			stop()
+			c.Close()
+			c = nil
+		}
 	}
-	defer c.Close()
-	// Cancelling closes the connection, so a long SEARCH returns.
-	stop := context.AfterFunc(ctx, func() { c.Close() })
-	defer stop()
+	defer drop()
 
-	header, text := headerCriteria(words), &imap.SearchCriteria{Text: words}
 	byHeader := map[int64][]uint32{}
-	for _, f := range folders {
-		uids, err := s.searchFolder(ctx, c, f, header)
-		if err != nil {
-			return s.searchErr(ctx, f, err)
-		}
-		byHeader[f.ID] = uids
-		if len(uids) > 0 {
-			found(Found{FolderID: f.ID, UIDs: uids})
-		}
+	passes := []struct {
+		crit    *imap.SearchCriteria
+		body    bool
+		timeout time.Duration
+	}{
+		{headerCriteria(words), false, headerSearchTimeout},
+		{&imap.SearchCriteria{Text: words}, true, bodySearchTimeout},
 	}
-	for _, f := range folders {
-		uids, err := s.searchFolder(ctx, c, f, text)
-		if err != nil {
-			return s.searchErr(ctx, f, err)
-		}
-		uids = slices.DeleteFunc(uids, func(u uint32) bool { return slices.Contains(byHeader[f.ID], u) })
-		if len(uids) > 0 {
-			found(Found{FolderID: f.ID, UIDs: uids, InBody: true})
+	for _, pass := range passes {
+		for i, f := range folders {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if c == nil {
+				if c, err = s.connect(nil); err != nil {
+					c = nil
+					return fmt.Errorf("%w: %v", ErrOffline, err)
+				}
+				// Cancelling closes the connection, so a long SEARCH returns.
+				conn := c
+				stop = context.AfterFunc(ctx, func() { conn.Close() })
+			}
+			report(Progress{FolderID: f.ID, Folder: f.Name, N: i + 1, Of: len(folders), Body: pass.body})
+			uids, err := s.searchFolder(ctx, c, f, pass.crit, pass.timeout)
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				reason := err.Error()
+				if errors.Is(err, errNoResponse) {
+					reason = fmt.Sprintf("no answer in %s", pass.timeout)
+				}
+				s.log.Warn("search skipped a folder", "folder", f.Name, "body", pass.body, "err", err)
+				report(Skipped{FolderID: f.ID, Folder: f.Name, Body: pass.body, Reason: reason})
+				select {
+				case <-c.Closed():
+					drop() // reconnect for the next folder
+				default:
+				}
+				continue
+			}
+			if pass.body {
+				uids = slices.DeleteFunc(uids, func(u uint32) bool { return slices.Contains(byHeader[f.ID], u) })
+			} else {
+				byHeader[f.ID] = uids
+			}
+			if len(uids) > 0 {
+				report(Found{FolderID: f.ID, UIDs: uids, InBody: pass.body})
+			}
 		}
 	}
 	return nil
-}
-
-func (s *Syncer) searchErr(ctx context.Context, f cache.Folder, err error) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	return fmt.Errorf("searching %s: %w", f.Name, err)
 }
 
 // searchFolders lists the folders to search, likeliest first: INBOX,
@@ -131,7 +195,7 @@ func headerCriteria(words []string) *imap.SearchCriteria {
 // cache doesn't have yet, so a folder that was never synced gets just
 // the messages found.
 func (s *Syncer) searchFolder(ctx context.Context, c *imapclient.Client, f cache.Folder,
-	crit *imap.SearchCriteria) ([]uint32, error) {
+	crit *imap.SearchCriteria, timeout time.Duration) ([]uint32, error) {
 	sel, err := selectFolder(c, f.Name, true, false)
 	if err != nil {
 		return nil, err
@@ -140,7 +204,7 @@ func (s *Syncer) searchFolder(ctx context.Context, c *imapclient.Client, f cache
 		return nil, nil
 	}
 	var data *imap.SearchData
-	err = doWithin(c, "search "+f.Name, searchTimeout, func() (err error) {
+	err = doWithin(c, "search "+f.Name, timeout, func() (err error) {
 		data, err = c.UIDSearch(crit, nil).Wait()
 		return err
 	})

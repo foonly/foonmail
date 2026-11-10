@@ -33,7 +33,6 @@ import (
 
 const (
 	commandTimeout       = 30 * time.Second
-	searchTimeout        = 5 * time.Minute // a body search reads the whole folder
 	defaultCheckInterval = 5 * time.Minute
 	maxBackoff           = time.Minute
 )
@@ -84,7 +83,10 @@ func (NewMail) isEvent()           {}
 func (UnreadChanged) isEvent()     {}
 func (ConnectionChanged) isEvent() {}
 
-var errWoken = errors.New("woken to reconnect")
+var (
+	errWoken      = errors.New("woken to reconnect")
+	errNoResponse = errors.New("no response") // a command timed out; the connection is closed
+)
 
 // Syncer syncs one account.
 type Syncer struct {
@@ -262,7 +264,7 @@ func doWithin(c *imapclient.Client, what string, timeout time.Duration, f func()
 		return nil
 	case <-t.C:
 		c.Close()
-		return fmt.Errorf("%s: no response in %s", what, timeout)
+		return fmt.Errorf("%s: %w in %s", what, errNoResponse, timeout)
 	}
 }
 

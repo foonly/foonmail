@@ -45,11 +45,20 @@ func TestServerSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.u.searchProgress(rpc.SearchProgress{Search: 7, FolderID: h.inbox.ID, Folder: "INBOX", N: 1, Of: 3})
+	if hd := strings.Join(h.u.resultsHeader(), " · "); !strings.Contains(hd, "searching headers in INBOX (1 of 3)") {
+		t.Errorf("header while searching INBOX: %q", hd)
+	}
 	h.u.searchFound(rpc.SearchFound{Search: 7, FolderID: h.inbox.ID, UIDs: []uint32{3}})
+	h.u.searchSkipped(rpc.SearchSkipped{Search: 7, FolderID: h.sent.ID, Folder: "Sent", Reason: "no answer in 30s"})
 	h.u.searchFound(rpc.SearchFound{Search: 7, FolderID: h.archive.ID, UIDs: []uint32{5}, InBody: true})
 	h.u.searchFound(rpc.SearchFound{Search: 99, FolderID: h.inbox.ID, UIDs: []uint32{1}}) // another search's
 	h.u.searchDone(rpc.SearchDone{Search: 7})
 	h.frame()
+	if hd := strings.Join(h.u.resultsHeader(), " · "); !strings.Contains(hd, "done in") ||
+		!strings.Contains(hd, "skipped Sent (headers: no answer in 30s)") {
+		t.Errorf("header when done: %q", hd)
+	}
 	var rows []string
 	for _, i := range h.u.view {
 		c := &h.u.convs[i]

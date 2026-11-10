@@ -29,7 +29,7 @@ type backend interface {
 	AppendDraft(ctx context.Context, raw []byte) error
 	CreateFolder(ctx context.Context, name string) (int64, error)
 	DeleteFolder(ctx context.Context, folderID int64) error
-	Search(ctx context.Context, words []string, found func(imapsync.Found)) error
+	Search(ctx context.Context, words []string, report func(imapsync.SearchEvent)) error
 }
 
 // service exports rpc.Interface on the session bus.
@@ -65,6 +65,10 @@ func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob
 				{Name: "OutboxChanged"},
 				{Name: "SearchFound", Args: []introspect.Arg{{Name: "search", Type: "x"}, {Name: "folder", Type: "x"},
 					{Name: "uids", Type: "au"}, {Name: "inBody", Type: "b"}}},
+				{Name: "SearchProgress", Args: []introspect.Arg{{Name: "search", Type: "x"}, {Name: "folder", Type: "x"},
+					{Name: "name", Type: "s"}, {Name: "n", Type: "i"}, {Name: "of", Type: "i"}, {Name: "inBody", Type: "b"}}},
+				{Name: "SearchSkipped", Args: []introspect.Arg{{Name: "search", Type: "x"}, {Name: "folder", Type: "x"},
+					{Name: "name", Type: "s"}, {Name: "inBody", Type: "b"}, {Name: "reason", Type: "s"}}},
 				{Name: "SearchDone", Args: []introspect.Arg{{Name: "search", Type: "x"}, {Name: "error", Type: "s"}}},
 			}},
 		},

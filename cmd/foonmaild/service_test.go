@@ -76,12 +76,14 @@ func (b *fakeBackend) DeleteFolder(_ context.Context, folderID int64) error {
 	return b.record(fmt.Sprint("delete folder ", folderID))
 }
 
-func (b *fakeBackend) Search(ctx context.Context, words []string, found func(imapsync.Found)) error {
+func (b *fakeBackend) Search(ctx context.Context, words []string, report func(imapsync.SearchEvent)) error {
 	if err := b.record("search " + strings.Join(words, " ")); err != nil {
 		return err
 	}
-	found(imapsync.Found{FolderID: 5, UIDs: []uint32{1, 2}})
-	found(imapsync.Found{FolderID: 6, UIDs: []uint32{9}, InBody: true})
+	report(imapsync.Progress{FolderID: 5, Folder: "INBOX", N: 1, Of: 2})
+	report(imapsync.Found{FolderID: 5, UIDs: []uint32{1, 2}})
+	report(imapsync.Skipped{FolderID: 6, Folder: "Archive", Reason: "no answer in 30s"})
+	report(imapsync.Found{FolderID: 6, UIDs: []uint32{9}, InBody: true})
 	return nil
 }
 
@@ -321,6 +323,10 @@ func TestServiceSearch(t *testing.T) {
 		select {
 		case ev := <-events:
 			switch ev := ev.(type) {
+			case rpc.SearchProgress:
+				got = append(got, fmt.Sprintf("%d: at %d %s %d/%d %v", ev.Search-id, ev.FolderID, ev.Folder, ev.N, ev.Of, ev.InBody))
+			case rpc.SearchSkipped:
+				got = append(got, fmt.Sprintf("%d: skipped %d %s %v %s", ev.Search-id, ev.FolderID, ev.Folder, ev.InBody, ev.Reason))
 			case rpc.SearchFound:
 				got = append(got, fmt.Sprintf("%d: %d %v %v", ev.Search-id, ev.FolderID, ev.UIDs, ev.InBody))
 			case rpc.SearchDone:
@@ -331,7 +337,8 @@ func TestServiceSearch(t *testing.T) {
 			t.Fatalf("no SearchDone; got %v", got)
 		}
 	}
-	want := []string{"0: 5 [1 2] false", "0: 6 [9] true", `0: done ""`}
+	want := []string{"0: at 5 INBOX 1/2 false", "0: 5 [1 2] false", "0: skipped 6 Archive false no answer in 30s",
+		"0: 6 [9] true", `0: done ""`}
 	if !slices.Equal(got, want) {
 		t.Errorf("events %q, want %q", got, want)
 	}

@@ -33,6 +33,9 @@ type serverSearch struct {
 	started time.Time
 	took    time.Duration
 
+	at      string   // what is being searched now: "headers in INBOX (1 of 20)"
+	skipped []string // folders left out, with why
+
 	hits   map[movingKey]bool // found messages, by folder and UID
 	inBody map[movingKey]bool // found by the body pass only
 	order  []int64            // folders with results, as they came
@@ -135,6 +138,30 @@ func (u *ui) searchFound(ev rpc.SearchFound) {
 	if s.opened == "" {
 		u.reload()
 	}
+}
+
+func (u *ui) searchProgress(ev rpc.SearchProgress) {
+	s := u.server
+	if s == nil || ev.Search != s.id {
+		return
+	}
+	pass := "headers"
+	if ev.InBody {
+		pass = "bodies"
+	}
+	s.at = fmt.Sprintf("%s in %s (%d of %d)", pass, ev.Folder, ev.N, ev.Of)
+}
+
+func (u *ui) searchSkipped(ev rpc.SearchSkipped) {
+	s := u.server
+	if s == nil || ev.Search != s.id {
+		return
+	}
+	pass := "headers"
+	if ev.InBody {
+		pass = "bodies"
+	}
+	s.skipped = append(s.skipped, fmt.Sprintf("%s (%s: %s)", ev.Folder, pass, ev.Reason))
 }
 
 func (u *ui) searchDone(ev rpc.SearchDone) {
@@ -260,10 +287,18 @@ func (u *ui) resultsHeader() []string {
 		parts = append(parts, found, "search failed: "+s.err)
 	case s.running && s.id == 0:
 		parts = append(parts, "starting…")
+	case s.running && s.at != "":
+		parts = append(parts, found, "searching "+s.at)
 	case s.running:
 		parts = append(parts, found, "searching…")
 	default:
 		parts = append(parts, found, fmt.Sprintf("done in %.1f s", s.took.Seconds()))
+	}
+	switch n := len(s.skipped); {
+	case n == 1:
+		parts = append(parts, "skipped "+s.skipped[0])
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("skipped %d: %s", n, strings.Join(s.skipped, ", ")))
 	}
 	return parts
 }

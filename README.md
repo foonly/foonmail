@@ -157,7 +157,7 @@ The bottom line of the window always shows the keys for what you're doing.
 | after s | the list shows the other conversations that look like the junked mail (same sender and mostly the same subject, or any sender with nearly the same subject of three words or more), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
 | u | only unread conversations (ones you read stay until u or Esc turns it off) |
 | / | filter the cached list as you type |
-| Ctrl+Enter in the filter | search the server instead: every folder but Trash and Junk (on Gmail, All Mail), From, To and Subject first, then the whole message. Results list with their folder, and "in body" for those found by the body alone; Enter opens one in its folder, closing it comes back, / changes the search, Esc goes back to the list |
+| Ctrl+Enter in the filter | search the server instead: every folder but Trash and Junk (on Gmail, All Mail), From, To and Subject first, then the whole message. The header shows which folder is being searched; a folder that doesn't answer in time (30 s for headers, 60 s for bodies) is skipped and named there. Results list with their folder, and "in body" for those found by the body alone; Enter opens one in its folder, closing it comes back, / changes the search, Esc goes back to the list |
 
 | In the folder pane | |
 |---|---|
