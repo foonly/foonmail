@@ -5,6 +5,7 @@
 //
 //	FetchBody(folder x, uid u) → (message x)   download a message body into the cache
 //	SyncFolder(folder x)                        sync a folder now
+//	Sync()                                      reconnect every account and resync now
 //	SetFlags(folder x, uids au, add as, remove as)
 //	Acknowledge()                               the user is looking: clear "new"
 //	Status() → (a(sbsii))                       per account: name, online, error, unread, new
@@ -109,6 +110,13 @@ func (c *Client) SetFlags(ctx context.Context, folderID int64, uids []uint32, ad
 		remove = []string{}
 	}
 	return mapError(c.call(ctx, "SetFlags", folderID, uids, add, remove).Err)
+}
+
+// Sync makes every account reconnect and resync now, or retry at once if
+// it's offline. It returns before the sync is done; Status and
+// FolderChanged follow it.
+func (c *Client) Sync(ctx context.Context) error {
+	return mapError(c.call(ctx, "Sync").Err)
 }
 
 // Acknowledge tells the daemon the user is looking at their mail.

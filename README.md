@@ -53,8 +53,11 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   in the folder from the same sender (or the same name with a number
   added) with mostly the same subject, or from anyone with nearly the
   same subject, ready to review and junk or trash in one go.
-- A tray icon (StatusNotifierItem) that lights up for new mail, and
-  notifications that open the message when clicked.
+- A tray icon (StatusNotifierItem) that lights up for new mail, with a
+  right-click menu (Open foonmail, Sync now), and notifications that open
+  the message when clicked.
+- Reconnects as soon as the network comes up (through NetworkManager) or
+  the machine wakes from sleep, instead of at its next retry.
 
 ## Requirements
 
@@ -186,6 +189,7 @@ foonmailctl talks to the running daemon:
 
 ```sh
 foonmailctl status               # accounts: online, unread, new
+foonmailctl sync                 # reconnect and resync every account now
 foonmailctl send home message.eml
 foonmailctl outbox               # what is waiting, sending or sent
 foonmailctl undo ID

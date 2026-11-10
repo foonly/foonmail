@@ -66,7 +66,7 @@ func TestRegisterPropertiesAndActivate(t *testing.T) {
 	activated := make(chan struct{}, 1)
 	tr, err := New(bus.Conn(), "foonmail",
 		State{Status: Active, IconName: "mail-read", Tooltip: "foonmail\nhome: 404 unread"},
-		func() { activated <- struct{}{} }, quiet)
+		func() { activated <- struct{}{} }, nil, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRegisterPropertiesAndActivate(t *testing.T) {
 
 func TestRegistersWhenHostStartsLaterAndRestarts(t *testing.T) {
 	bus := dbustest.Start(t)
-	tr, err := New(bus.Conn(), "foonmail", State{Status: Active, IconName: "mail-read"}, nil, quiet)
+	tr, err := New(bus.Conn(), "foonmail", State{Status: Active, IconName: "mail-read"}, nil, nil, quiet)
 	if err != nil {
 		t.Fatal(err) // no host yet is not an error
 	}
@@ -155,4 +155,61 @@ func TestRegistersWhenHostStartsLaterAndRestarts(t *testing.T) {
 	w.conn.Close()
 	w2 := startWatcher(t, bus)
 	eventually(t, "registration with the restarted host", func() bool { return len(w2.registrations()) == 1 })
+}
+
+// The host reads the menu's layout from the path in the Menu property,
+// shows the labels, and sends "clicked" for the one picked.
+func TestMenu(t *testing.T) {
+	bus := dbustest.Start(t)
+	w := startWatcher(t, bus)
+	synced := make(chan struct{}, 1)
+	tr, err := New(bus.Conn(), "foonmail", State{Status: Active, IconName: "mail-read"}, nil,
+		[]MenuItem{{Label: "Open foonmail"}, {Label: "Sync now", Do: func() { synced <- struct{}{} }}}, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	eventually(t, "registration", func() bool { return len(w.registrations()) == 1 })
+	name := w.registrations()[0]
+
+	host := bus.Conn()
+	v, err := host.Object(name, itemPath).GetProperty(itemIface + ".Menu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := v.Value().(dbus.ObjectPath)
+	if path != menuPath {
+		t.Fatalf("Menu = %v", v.Value())
+	}
+	m := host.Object(name, path)
+
+	var rev uint32
+	var root layout
+	if err := m.Call(menuIface+".GetLayout", 0, int32(0), int32(-1), []string{}).Store(&rev, &root); err != nil {
+		t.Fatal(err)
+	}
+	var labels []string
+	for _, c := range root.Children {
+		var item layout
+		if err := dbus.Store([]any{c.Value()}, &item); err != nil {
+			t.Fatal(err)
+		}
+		labels = append(labels, item.Props["label"].Value().(string))
+	}
+	if strings.Join(labels, ", ") != "Open foonmail, Sync now" {
+		t.Errorf("labels = %q", labels)
+	}
+
+	if err := m.Call(menuIface+".Event", 0, int32(2), "clicked", dbus.MakeVariant(""), uint32(0)).Err; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-synced:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clicking Sync now did not reach its callback")
+	}
+	var version uint32
+	if v, err := m.GetProperty(menuIface + ".Version"); err != nil || dbus.Store([]any{v.Value()}, &version) != nil || version != 3 {
+		t.Errorf("Version = %v, %v", v, err)
+	}
 }

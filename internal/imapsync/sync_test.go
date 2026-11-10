@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -416,6 +417,39 @@ func TestResumeReconnects(t *testing.T) {
 	e.eventually("first connection", func() bool { return connected() == 1 })
 	e.waker.Wake()
 	e.eventually("reconnected after resume", func() bool { return connected() == 2 })
+}
+
+// Started without a network, the loops wait to retry; a wake (the network
+// coming up, or a manual sync) connects at once instead of at the retry.
+func TestWakeRetriesNow(t *testing.T) {
+	e := newEnv(t)
+	var offline atomic.Bool
+	var dials atomic.Int32
+	offline.Store(true)
+	dial := e.syncer.opts.Dial
+	e.syncer.opts.Dial = func(srv config.Server, opts *imapclient.Options) (*imapclient.Client, error) {
+		dials.Add(1)
+		if offline.Load() {
+			return nil, errors.New("network is unreachable")
+		}
+		return dial(srv, opts)
+	}
+	e.syncer.firstBackoff = time.Hour
+	e.start()
+	defer e.stop()
+	e.eventually("both connections failing", func() bool { return dials.Load() == 2 })
+	offline.Store(false)
+	e.waker.Wake()
+	e.eventually("connected after the wake", func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		for _, ev := range e.events {
+			if c, ok := ev.(ConnectionChanged); ok && c.Online {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestParseReferences(t *testing.T) {

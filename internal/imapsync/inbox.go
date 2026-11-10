@@ -121,7 +121,7 @@ func (s *Syncer) idleLoop(ctx context.Context, c *imapclient.Client, wake <-chan
 			case <-check.C:
 				break wait
 			case <-wake:
-				return errResumed
+				return errWoken
 			case <-c.Closed():
 				return errors.New("connection closed by server")
 			case <-ctx.Done():

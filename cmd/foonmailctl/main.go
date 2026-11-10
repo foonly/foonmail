@@ -1,6 +1,7 @@
 // Command foonmailctl talks to a running foonmaild over D-Bus.
 //
 //	foonmailctl status                    accounts: online, unread, new
+//	foonmailctl sync                      reconnect and resync every account now
 //	foonmailctl send ACCOUNT FILE         queue a message (FILE "-" reads stdin)
 //	foonmailctl outbox                    list unfinished and recent messages
 //	foonmailctl undo ID                   take a message back during the undo window
@@ -25,6 +26,7 @@ import (
 
 const usage = `usage:
   foonmailctl status
+  foonmailctl sync
   foonmailctl send ACCOUNT FILE      (FILE "-" reads the message from stdin)
   foonmailctl outbox
   foonmailctl undo ID
@@ -68,6 +70,9 @@ func run(args []string) error {
 			fmt.Fprintf(w, "%s\t%v\t%d\t%d\t%s\n", a.Name, a.Online, a.Unread, a.New, a.Error)
 		}
 		return w.Flush()
+
+	case cmd == "sync" && len(args) == 1:
+		return c.Sync(ctx)
 
 	case cmd == "send" && len(args) == 3:
 		var raw []byte

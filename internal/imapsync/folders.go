@@ -56,7 +56,7 @@ func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error 
 			default:
 			}
 		case <-wake:
-			return errResumed
+			return errWoken
 		case <-c.Closed():
 			return errors.New("connection closed by server")
 		case <-ctx.Done():

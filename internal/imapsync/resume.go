@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-// Waker detects resume from suspend and tells every subscriber.
+// Waker tells every subscribed connection to reconnect now. Watch calls
+// Wake on resume from suspend; the daemon also calls it when the network
+// comes up and when the user asks for a sync.
 //
 // Go's monotonic clock uses CLOCK_MONOTONIC, which stops during suspend on
 // Linux, while the wall clock keeps going; a gap between the two means the

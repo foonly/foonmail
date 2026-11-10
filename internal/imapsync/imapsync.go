@@ -9,8 +9,9 @@
 //     a folder only when STATUS shows it changed. (Syncing a folder the GUI
 //     opens will use this connection too, so it never interrupts IDLE.)
 //
-// Both reconnect with backoff, and both drop their connection and resync at
-// once when the system resumes from sleep.
+// Both reconnect with backoff. When woken (see Waker: resume from sleep,
+// the network coming up, or a manual sync), both drop their connection, or
+// stop waiting to retry, and reconnect and resync at once.
 package imapsync
 
 import (
@@ -82,7 +83,7 @@ func (NewMail) isEvent()           {}
 func (UnreadChanged) isEvent()     {}
 func (ConnectionChanged) isEvent() {}
 
-var errResumed = errors.New("system resumed from sleep")
+var errWoken = errors.New("woken to reconnect")
 
 // Syncer syncs one account.
 type Syncer struct {
@@ -97,6 +98,8 @@ type Syncer struct {
 	baselineUID      uint32 // INBOX UIDs below this were there at start; see setBaseline
 
 	requests chan request // served by the folder connection
+
+	firstBackoff time.Duration // the first wait to retry; tests make it long
 }
 
 // New prepares a Syncer for an account.
@@ -121,11 +124,13 @@ func New(ctx context.Context, opts Options) (*Syncer, error) {
 		log:       opts.Log.With("account", opts.Account.Name),
 		accountID: id,
 		requests:  make(chan request),
+
+		firstBackoff: time.Second,
 	}, nil
 }
 
-// Run syncs until ctx is cancelled. wake signals resume from sleep; each
-// connection needs its own channel (see Waker.Subscribe).
+// Run syncs until ctx is cancelled. A value on a wake channel makes that
+// connection reconnect at once; each needs its own (see Waker.Subscribe).
 func (s *Syncer) Run(ctx context.Context, inboxWake, folderWake <-chan struct{}) {
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -146,23 +151,31 @@ func (s *Syncer) Run(ctx context.Context, inboxWake, folderWake <-chan struct{})
 func (s *Syncer) loop(ctx context.Context, name string, wake <-chan struct{}, serve <-chan request,
 	session func(context.Context, <-chan struct{}) error) {
 	log := s.log.With("conn", name)
-	backoff := time.Second
+	backoff := s.firstBackoff
+retryNow:
 	for {
+		// A wake from before this attempt is answered by it.
+		select {
+		case <-wake:
+		default:
+		}
 		started := time.Now()
 		err := session(ctx, wake)
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errWoken) {
+			// Not reported as offline: it reconnects at once, and a
+			// failure to will be.
+			log.Info("woken, reconnecting")
+			backoff = s.firstBackoff
+			continue
+		}
 		if name == "inbox" {
 			s.notify(ConnectionChanged{Account: s.acct.Name, Online: false, Err: err})
 		}
 		if time.Since(started) > time.Minute {
-			backoff = time.Second
-		}
-		if errors.Is(err, errResumed) {
-			log.Info("resumed from sleep, reconnecting")
-			backoff = time.Second
-			continue
+			backoff = s.firstBackoff
 		}
 		log.Warn("disconnected", "err", err, "retry_in", backoff)
 		// While waiting, answer requests at once instead of leaving them hanging.
@@ -173,8 +186,11 @@ func (s *Syncer) loop(ctx context.Context, name string, wake <-chan struct{}, se
 			case <-retry.C:
 				break wait
 			case <-wake:
+				// The network is back, or the user asked: retry now.
 				retry.Stop()
-				break wait
+				log.Info("woken, retrying now")
+				backoff = s.firstBackoff
+				continue retryNow
 			case req := <-serve:
 				req.reply <- reqResult{err: fmt.Errorf("%w: %v", ErrOffline, err)}
 			case <-ctx.Done():

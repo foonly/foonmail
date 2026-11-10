@@ -83,6 +83,7 @@ func run(configPath string, log *slog.Logger) error {
 
 	waker := &imapsync.Waker{}
 	go waker.Watch(ctx, log)
+	go watchNetwork(ctx, waker.Wake, log)
 
 	h, err := newHub(ctx, cfg, db, nil, nil, log)
 	if err != nil {
@@ -134,13 +135,13 @@ func run(configPath string, log *slog.Logger) error {
 		log.Warn("no session bus: running without tray, notifications and GUI interface", "err", err)
 	} else {
 		defer conn.Close()
-		closeDesktop := connectDesktop(h, conn, log)
+		closeDesktop := connectDesktop(h, conn, waker.Wake, log)
 		defer closeDesktop()
 		var api outboxAPI // a nil *Outbox would be a non-nil interface
 		if ob != nil {
 			api = ob
 		}
-		svc, err := exportService(conn, db, backends, api, h, log)
+		svc, err := exportService(conn, db, backends, api, h, waker.Wake, log)
 		if err != nil {
 			return err
 		}
@@ -173,11 +174,18 @@ func run(configPath string, log *slog.Logger) error {
 // connectDesktop attaches the tray icon and notifications to the hub. The
 // daemon still syncs without them, for example on a desktop with no tray.
 // It must run before h.run starts.
-func connectDesktop(h *hub, conn *dbus.Conn, log *slog.Logger) (closeDesktop func()) {
+// syncNow is the tray menu's Sync now.
+func connectDesktop(h *hub, conn *dbus.Conn, syncNow func(), log *slog.Logger) (closeDesktop func()) {
 	h.notifier = &lazyNotifier{conn: conn, log: log}
 	h.gui = rpc.NewGUIClient(conn)
 	t, err := tray.New(conn, "foonmail", tray.State{Status: tray.Active, IconName: "mail-read", Tooltip: "foonmail"},
-		h.activate, log)
+		h.activate, []tray.MenuItem{
+			{Label: "Open foonmail", Do: h.activate},
+			{Label: "Sync now", Do: func() {
+				log.Info("sync requested from the tray")
+				syncNow()
+			}},
+		}, log)
 	if err != nil {
 		log.Warn("no tray icon", "err", err)
 	} else {

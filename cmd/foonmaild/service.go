@@ -39,11 +39,16 @@ type service struct {
 	hub      *hub
 	outbox   outboxAPI // nil when the outbox couldn't be opened
 	log      *slog.Logger
+
+	// syncNow makes every account reconnect and resync at once; nil in
+	// tests that don't need it.
+	syncNow func()
 }
 
 // exportService puts the daemon's interface on conn and claims rpc.BusName.
-func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob outboxAPI, h *hub, log *slog.Logger) (*service, error) {
-	s := &service{conn: conn, db: db, backends: backends, outbox: ob, hub: h, log: log}
+// syncNow is what the Sync method calls.
+func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob outboxAPI, h *hub, syncNow func(), log *slog.Logger) (*service, error) {
+	s := &service{conn: conn, db: db, backends: backends, outbox: ob, hub: h, syncNow: syncNow, log: log}
 	if err := conn.Export(methods{s}, rpc.Path, rpc.Interface); err != nil {
 		return nil, err
 	}
@@ -137,6 +142,16 @@ func (m methods) SetFlags(folderID int64, uids []uint32, add, remove []string) *
 		return dbusError(err)
 	}
 	return dbusError(b.SetFlags(ctx, folderID, uids, add, remove))
+}
+
+// Sync reconnects every account and resyncs: retries at once if offline.
+// It returns without waiting for the sync.
+func (m methods) Sync() *dbus.Error {
+	if m.s.syncNow != nil {
+		m.s.log.Info("sync requested")
+		m.s.syncNow()
+	}
+	return nil
 }
 
 func (m methods) Acknowledge() *dbus.Error {

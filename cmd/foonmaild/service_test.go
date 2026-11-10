@@ -91,6 +91,7 @@ type serviceEnv struct {
 	hub     *hub
 	inbox   int64
 	bus     *dbustest.Bus
+	woken   chan struct{} // Sync was called
 }
 
 func newServiceEnv(t *testing.T) *serviceEnv {
@@ -114,14 +115,16 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 	acct, _ := db.EnsureAccount(ctx, "home")
 	b := &fakeBackend{}
 	fo := &fakeOutbox{}
-	svc, err := exportService(bus.Conn(), db, map[int64]backend{acct: b}, fo, h, log)
+	woken := make(chan struct{}, 1)
+	svc, err := exportService(bus.Conn(), db, map[int64]backend{acct: b}, fo, h,
+		func() { woken <- struct{}{} }, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.signals = svc
 	go h.run(ctx)
 	return &serviceEnv{t: t, client: rpc.NewClient(bus.Conn()), backend: b, outbox: fo, hub: h,
-		inbox: h.accounts["home"].inbox, bus: bus}
+		inbox: h.accounts["home"].inbox, bus: bus, woken: woken}
 }
 
 func callCtx(t *testing.T) context.Context {
@@ -236,7 +239,7 @@ func TestServiceNotRunningAndSecondDaemon(t *testing.T) {
 	}
 
 	e := newServiceEnv(t)
-	if _, err := exportService(e.bus.Conn(), nil, nil, nil, nil, slog.Default()); err == nil {
+	if _, err := exportService(e.bus.Conn(), nil, nil, nil, nil, nil, slog.Default()); err == nil {
 		t.Error("a second service claimed the bus name")
 	}
 }
@@ -277,5 +280,17 @@ func TestServiceFolders(t *testing.T) {
 	}
 	if _, err := e.client.CreateFolder(ctx, "nobody", "X"); !errors.Is(err, rpc.ErrNotFound) {
 		t.Errorf("unknown account: err = %v", err)
+	}
+}
+
+func TestServiceSync(t *testing.T) {
+	e := newServiceEnv(t)
+	if err := e.client.Sync(callCtx(t)); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	select {
+	case <-e.woken:
+	default:
+		t.Error("Sync didn't wake the sync loops")
 	}
 }

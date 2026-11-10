@@ -2,8 +2,9 @@
 // D-Bus protocol, which KDE, waybar, Quickshell and most Wayland bars
 // implement. GNOME needs an extension.
 //
-// The icon is given by name, so it comes from the user's icon theme. There
-// is no menu: left click calls OnActivate, and the tooltip carries details.
+// The icon is given by name, so it comes from the user's icon theme. Left
+// click calls onActivate, right click shows the given menu (see menu.go),
+// and the tooltip carries details.
 // The item registers again whenever the tray host (the StatusNotifierWatcher)
 // restarts, which happens every time a Quickshell config is reloaded.
 package tray
@@ -70,8 +71,8 @@ type Tray struct {
 
 // New exports a tray item on conn and registers it with the tray host, now
 // and whenever the host restarts. onActivate is called on left click, from
-// a D-Bus goroutine.
-func New(conn *dbus.Conn, id string, initial State, onActivate func(), log *slog.Logger) (*Tray, error) {
+// a D-Bus goroutine; menu, if any, is shown on right click.
+func New(conn *dbus.Conn, id string, initial State, onActivate func(), menu []MenuItem, log *slog.Logger) (*Tray, error) {
 	t := &Tray{
 		conn:       conn,
 		name:       fmt.Sprintf("org.kde.StatusNotifierItem-%d-1", os.Getpid()),
@@ -81,7 +82,15 @@ func New(conn *dbus.Conn, id string, initial State, onActivate func(), log *slog
 		signals:    make(chan *dbus.Signal, 8),
 	}
 	title, text := splitTooltip(initial.Tooltip)
+	menuPathProp := dbus.ObjectPath("/NO_DBUSMENU")
+	if len(menu) > 0 {
+		if err := exportMenu(conn, menu); err != nil {
+			return nil, err
+		}
+		menuPathProp = menuPath
+	}
 	props, err := prop.Export(conn, itemPath, prop.Map{itemIface: {
+		"Menu":       {Value: menuPathProp, Emit: prop.EmitTrue},
 		"Category":   {Value: "Communications", Emit: prop.EmitTrue},
 		"Id":         {Value: id, Emit: prop.EmitTrue},
 		"Title":      {Value: id, Emit: prop.EmitTrue},
