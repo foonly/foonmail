@@ -33,6 +33,7 @@ import (
 
 const (
 	commandTimeout       = 30 * time.Second
+	searchTimeout        = 5 * time.Minute // a body search reads the whole folder
 	defaultCheckInterval = 5 * time.Minute
 	maxBackoff           = time.Minute
 )
@@ -244,9 +245,14 @@ func dialServer(srv config.Server, opts *imapclient.Options) (*imapclient.Client
 // do runs an IMAP command and gives up after commandTimeout, closing the
 // connection so the blocked command returns.
 func do(c *imapclient.Client, what string, f func() error) error {
+	return doWithin(c, what, commandTimeout, f)
+}
+
+// doWithin is do with another timeout.
+func doWithin(c *imapclient.Client, what string, timeout time.Duration, f func() error) error {
 	done := make(chan error, 1)
 	go func() { done <- f() }()
-	t := time.NewTimer(commandTimeout)
+	t := time.NewTimer(timeout)
 	defer t.Stop()
 	select {
 	case err := <-done:
@@ -256,7 +262,7 @@ func do(c *imapclient.Client, what string, f func() error) error {
 		return nil
 	case <-t.C:
 		c.Close()
-		return fmt.Errorf("%s: no response in %s", what, commandTimeout)
+		return fmt.Errorf("%s: no response in %s", what, timeout)
 	}
 }
 

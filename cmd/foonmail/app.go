@@ -41,6 +41,8 @@ type daemon interface {
 	MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error
 	CreateFolder(ctx context.Context, account, name string) (int64, error)
 	DeleteFolder(ctx context.Context, folderID int64) error
+	SearchServer(ctx context.Context, account string, words []string) (int64, error)
+	CancelSearch(ctx context.Context, id int64) error
 }
 
 type mode int
@@ -136,6 +138,7 @@ type ui struct {
 	undoDelay     time.Duration      // how long sent mail can be taken back
 	marks         map[string]bool    // marked conversations, by key
 	similar       *similarSet        // the list narrowed to look-alikes of junked mail
+	server        *serverSearch      // Ctrl+Enter: server search results replace the list
 	onlyUnread    bool               // u: the list shows unread conversations only
 	wasUnread     map[string]bool    // conversations shown as unread since u, kept when read
 	markBase      map[string]bool    // the marks before the current Shift range
@@ -181,6 +184,11 @@ func (u *ui) reload() {
 	if c := u.current(); c != nil {
 		keep = c.key
 	}
+	if u.showingResults() {
+		u.buildResults()
+		u.applyFilter(keep)
+		return
+	}
 	ctx := context.Background()
 	entries, err := u.db.Entries(ctx, u.folder.ID)
 	if err != nil {
@@ -217,6 +225,15 @@ func (u *ui) reload() {
 // conversation with key keep selected if it is still shown.
 func (u *ui) applyFilter(keep string) {
 	u.view = u.view[:0]
+	if u.server != nil {
+		// The results, or the folder of the one being read: no filter,
+		// so the opened result is there to select.
+		for i := range u.convs {
+			u.view = append(u.view, i)
+		}
+		u.selectKey(keep)
+		return
+	}
 	if u.similar != nil {
 		for i, c := range u.convs {
 			if u.similar.keys[c.key] {
@@ -261,6 +278,12 @@ func (u *ui) applyFilter(keep string) {
 			return !u.wasUnread[c.key]
 		})
 	}
+	u.selectKey(keep)
+}
+
+// selectKey selects the conversation with key keep if it is shown, else
+// the first.
+func (u *ui) selectKey(keep string) {
 	u.sel = 0
 	for vi, i := range u.view {
 		if u.convs[i].key == keep {
@@ -496,6 +519,7 @@ func (u *ui) showFolder(f cache.Folder) {
 			u.useAccount(a)
 		}
 	}
+	u.endServerSearch()
 	u.folder = f
 	u.similar = nil
 	clear(u.wasUnread)

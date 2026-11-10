@@ -100,6 +100,10 @@ func (u *ui) showMessage(folderID int64, uid uint32) {
 		u.search.SetText("")
 		u.searching = false
 	}
+	if s := u.server; s != nil { // the notification's message wins over search results
+		u.endServerSearch()
+		u.folder = s.from
+	}
 	if folderID != u.folder.ID {
 		f, err := u.db.FolderByID(context.Background(), folderID)
 		if err != nil {

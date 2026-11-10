@@ -16,12 +16,16 @@
 //	SaveDraft(account s, raw ay)                store a draft in the Drafts folder
 //	DeleteMessages(folder x, uids au)           remove messages for good (UID EXPUNGE)
 //	MoveMessages(folder x, uids au, dest x)     move messages to another folder
+//	SearchServer(account s, words as) → (id x)  search the server's folders; results follow as signals
+//	CancelSearch(id x)                          stop a server search
 //
-// and three signals:
+// and these signals:
 //
 //	FolderChanged(folder x)   the cache's copy of a folder changed
 //	StatusChanged()           call Status again
 //	OutboxChanged()           call Outbox again
+//	SearchFound(search x, folder x, uids au, inBody b)  results, already in the cache
+//	SearchDone(search x, error s)                       the search ended; error is "" when it went fine
 //
 // Folders are cache folder ids; messages are cache message ids.
 package rpc
@@ -42,6 +46,8 @@ const (
 	SignalFolderChanged = Interface + ".FolderChanged"
 	SignalStatusChanged = Interface + ".StatusChanged"
 	SignalOutboxChanged = Interface + ".OutboxChanged"
+	SignalSearchFound   = Interface + ".SearchFound"
+	SignalSearchDone    = Interface + ".SearchDone"
 
 	// D-Bus error names, mapped to the Go errors below.
 	ErrNameOffline  = Interface + ".Error.Offline"
@@ -119,6 +125,20 @@ func (c *Client) Sync(ctx context.Context) error {
 	return mapError(c.call(ctx, "Sync").Err)
 }
 
+// SearchServer starts a server search of account's folders for messages
+// with all of words and returns its id; SearchFound and SearchDone events
+// with that id follow.
+func (c *Client) SearchServer(ctx context.Context, account string, words []string) (int64, error) {
+	var id int64
+	err := c.call(ctx, "SearchServer", account, words).Store(&id)
+	return id, mapError(err)
+}
+
+// CancelSearch stops a server search.
+func (c *Client) CancelSearch(ctx context.Context, id int64) error {
+	return mapError(c.call(ctx, "CancelSearch", id).Err)
+}
+
 // Acknowledge tells the daemon the user is looking at their mail.
 func (c *Client) Acknowledge(ctx context.Context) error {
 	return mapError(c.call(ctx, "Acknowledge").Err)
@@ -142,6 +162,24 @@ type StatusChanged struct{}
 
 // OutboxChanged means Outbox should be called again.
 type OutboxChanged struct{}
+
+// SearchFound is a batch of server search results, in the cache by now.
+type SearchFound struct {
+	Search   int64
+	FolderID int64
+	UIDs     []uint32
+	InBody   bool // matched in the body only
+}
+
+// SearchDone ends a server search. Err is "" when it went fine, and
+// "cancelled" after CancelSearch.
+type SearchDone struct {
+	Search int64
+	Err    string
+}
+
+func (SearchFound) isEvent() {}
+func (SearchDone) isEvent()  {}
 
 func (FolderChanged) isEvent() {}
 func (StatusChanged) isEvent() {}
@@ -170,6 +208,16 @@ func (c *Client) Subscribe() (events <-chan Event, stop func(), err error) {
 				out <- StatusChanged{}
 			case SignalOutboxChanged:
 				out <- OutboxChanged{}
+			case SignalSearchFound:
+				var ev SearchFound
+				if dbus.Store(s.Body, &ev.Search, &ev.FolderID, &ev.UIDs, &ev.InBody) == nil {
+					out <- ev
+				}
+			case SignalSearchDone:
+				var ev SearchDone
+				if dbus.Store(s.Body, &ev.Search, &ev.Err) == nil {
+					out <- ev
+				}
 			}
 		}
 	}()

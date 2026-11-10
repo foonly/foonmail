@@ -49,6 +49,8 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   conversation or several marked ones. A folder pane lists all folders,
   with the special ones (Drafts, Sent, Archive, Junk, Trash) first, and
   creates and deletes folders.
+- Server search across all folders, message bodies included, for mail
+  that isn't in the cache. What it finds is added to the cache.
 - Junking a message brings up the rest of the spam run: the conversations
   in the folder from the same sender (or the same name with a number
   added) with mostly the same subject, or from anyone with nearly the
@@ -154,7 +156,8 @@ The bottom line of the window always shows the keys for what you're doing.
 | ! | flag or unflag (shown as ! in the list; other clients call it a star) |
 | after s | the list shows the other conversations that look like the junked mail (same sender and mostly the same subject, or any sender with nearly the same subject of three words or more), all marked: s junks them too, d trashes them, Space unmarks one, Esc goes back |
 | u | only unread conversations (ones you read stay until u or Esc turns it off) |
-| / | filter |
+| / | filter the cached list as you type |
+| Ctrl+Enter in the filter | search the server instead: every folder but Trash and Junk (on Gmail, All Mail), From, To and Subject first, then the whole message. Results list with their folder, and "in body" for those found by the body alone; Enter opens one in its folder, closing it comes back, / changes the search, Esc goes back to the list |
 
 | In the folder pane | |
 |---|---|

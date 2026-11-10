@@ -46,6 +46,7 @@ type fakeDaemon struct {
 	moved       []string
 	moveErr     error
 	folderCalls []string
+	searchCalls []string
 	err         error // returned by every call
 	flagsErr    error
 }
@@ -129,6 +130,29 @@ func (d *fakeDaemon) CreateFolder(ctx context.Context, account, name string) (in
 	d.folderCalls = append(d.folderCalls, "create "+account+" "+name)
 	d.mu.Unlock()
 	return f.ID, err
+}
+
+func (d *fakeDaemon) SearchServer(_ context.Context, account string, words []string) (int64, error) {
+	if d.err != nil {
+		return 0, d.err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.searchCalls = append(d.searchCalls, "search "+account+" "+strings.Join(words, " "))
+	return 7, nil
+}
+
+func (d *fakeDaemon) CancelSearch(_ context.Context, id int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.searchCalls = append(d.searchCalls, fmt.Sprint("cancel ", id))
+	return nil
+}
+
+func (d *fakeDaemon) searchCallList() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.searchCalls)
 }
 
 func (d *fakeDaemon) DeleteFolder(ctx context.Context, folderID int64) error {

@@ -76,6 +76,15 @@ func (b *fakeBackend) DeleteFolder(_ context.Context, folderID int64) error {
 	return b.record(fmt.Sprint("delete folder ", folderID))
 }
 
+func (b *fakeBackend) Search(ctx context.Context, words []string, found func(imapsync.Found)) error {
+	if err := b.record("search " + strings.Join(words, " ")); err != nil {
+		return err
+	}
+	found(imapsync.Found{FolderID: 5, UIDs: []uint32{1, 2}})
+	found(imapsync.Found{FolderID: 6, UIDs: []uint32{9}, InBody: true})
+	return nil
+}
+
 func (b *fakeBackend) SetFlags(_ context.Context, folderID int64, uids []uint32, add, remove []string) error {
 	if !slices.Equal(uids, []uint32{3, 4}) || !slices.Equal(add, []string{`\Seen`}) || len(remove) != 0 {
 		return errors.New("unexpected SetFlags arguments")
@@ -292,5 +301,44 @@ func TestServiceSync(t *testing.T) {
 	case <-e.woken:
 	default:
 		t.Error("Sync didn't wake the sync loops")
+	}
+}
+
+func TestServiceSearch(t *testing.T) {
+	e := newServiceEnv(t)
+	events, stop, err := e.client.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	id, err := e.client.SearchServer(callCtx(t), "home", []string{"invoice", "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	deadline := time.After(5 * time.Second)
+	for done := false; !done; {
+		select {
+		case ev := <-events:
+			switch ev := ev.(type) {
+			case rpc.SearchFound:
+				got = append(got, fmt.Sprintf("%d: %d %v %v", ev.Search-id, ev.FolderID, ev.UIDs, ev.InBody))
+			case rpc.SearchDone:
+				got = append(got, fmt.Sprintf("%d: done %q", ev.Search-id, ev.Err))
+				done = true
+			}
+		case <-deadline:
+			t.Fatalf("no SearchDone; got %v", got)
+		}
+	}
+	want := []string{"0: 5 [1 2] false", "0: 6 [9] true", `0: done ""`}
+	if !slices.Equal(got, want) {
+		t.Errorf("events %q, want %q", got, want)
+	}
+	if !slices.Contains(e.backend.recorded(), "search invoice acme") {
+		t.Errorf("backend calls = %v", e.backend.recorded())
+	}
+	if _, err := e.client.SearchServer(callCtx(t), "nobody", []string{"x"}); !errors.Is(err, rpc.ErrNotFound) {
+		t.Errorf("SearchServer of an unknown account: %v", err)
 	}
 }

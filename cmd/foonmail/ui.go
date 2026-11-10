@@ -35,6 +35,7 @@ const (
 func (u *ui) layout(gtx layout.Context) {
 	u.rowH = gtx.Dp(30)
 	u.globalKeys(gtx)
+	u.backToResults()
 	paint.Fill(gtx.Ops, u.th.Bg)
 	// Handle the current mode's events; if that switches mode, handle the
 	// new mode's too, so whichever mode this frame ends in has registered
@@ -159,6 +160,10 @@ func (u *ui) updateList(gtx layout.Context) {
 			continue
 		}
 		page := max(1, u.viewH/u.rowH-1)
+		if u.showingResults() {
+			u.resultKey(ke, page)
+			continue
+		}
 		// goTo moves the selection; with Shift it marks the rows on the way.
 		goTo := u.moveTo
 		if ke.Modifiers.Contain(key.ModShift) {
@@ -284,12 +289,19 @@ func (u *ui) updateList(gtx layout.Context) {
 		}
 	}
 	for {
-		ev, ok := gtx.Event(key.Filter{Focus: &u.search, Name: key.NameEscape})
+		ev, ok := gtx.Event(key.Filter{Focus: &u.search, Name: key.NameEscape},
+			key.Filter{Focus: &u.search, Name: key.NameReturn, Required: key.ModCtrl},
+			key.Filter{Focus: &u.search, Name: key.NameEnter, Required: key.ModCtrl})
 		if !ok {
 			break
 		}
 		if ke, ok := ev.(key.Event); ok && ke.State == key.Press {
-			u.clearFilter()
+			if ke.Name == key.NameEscape {
+				u.clearFilter()
+			} else {
+				u.startServerSearch()
+				return
+			}
 		}
 	}
 }
@@ -334,6 +346,10 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 		hints = "Move " + conversations(len(u.pane.moving)) + " to: j/k choose a folder · Enter or → moves · n new folder · Esc cancels"
 	case u.pane.open:
 		hints = "j/k preview a folder · Enter or → open and sync it · n new folder · d delete · Esc, c or ← back to " + u.pane.origin.Name
+	case u.showingResults():
+		hints = resultHints
+	case u.searching:
+		hints = "Enter back to the list · Ctrl+Enter searches all folders on the server · Esc clears"
 	case u.similar != nil:
 		hints = fmt.Sprintf("Look-alikes of the junked mail, %d marked · s junks the marked · d trashes them · Space unmarks · Esc back to all", u.markCount())
 	case u.markCount() > 0:
@@ -352,6 +368,8 @@ func (u *ui) header(gtx layout.Context) layout.Dimensions {
 	}
 	parts := []string{u.account.Name, u.folder.Name}
 	switch {
+	case u.showingResults():
+		parts = u.resultsHeader()
 	case u.similar != nil:
 		parts = append(parts, fmt.Sprintf("%d like “%s”", len(u.view), u.similar.subject))
 	case u.searching && u.search.Len() > 0:
@@ -427,7 +445,12 @@ func (u *ui) listArea(gtx layout.Context) layout.Dimensions {
 	u.click.Add(gtx.Ops)
 	if len(u.view) == 0 {
 		msg := "This folder is empty."
-		if u.searching && u.search.Len() > 0 {
+		if u.showingResults() {
+			msg = "Nothing found yet."
+			if !u.server.running {
+				msg = "Nothing found on the server. / changes the search, Esc goes back."
+			}
+		} else if u.searching && u.search.Len() > 0 {
 			msg = "No conversations match."
 		} else if u.onlyUnread {
 			msg = "No unread conversations. u shows them all."
@@ -484,10 +507,23 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 	if strings.TrimSpace(subject) == "" {
 		subject = "(no subject)"
 	}
+	results := u.showingResults()
+	folder, inBody := layout.Widget(nil), ""
+	if results {
+		folder = u.cell(150, u.server.names[c.folder], font.Font{}, u.muted)
+		if u.server.onlyInBody(c) {
+			inBody = "in body"
+		}
+	}
 	return layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		cols := []layout.FlexChild{
 			layout.Rigid(u.cell(36, flags, font.Font{Weight: font.Bold}, u.accent)),
 			layout.Rigid(u.cell(96, shortDate(c.latest, u.now()), font.Font{}, u.muted)),
+		}
+		if folder != nil {
+			cols = append(cols, layout.Rigid(folder))
+		}
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx, append(cols,
 			layout.Rigid(u.cell(230, c.people, f, u.th.Fg)),
 			layout.Rigid(u.cell(36, count, font.Font{}, u.muted)),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -495,7 +531,15 @@ func (u *ui) row(gtx layout.Context, i int) layout.Dimensions {
 				l.MaxLines, l.Font.Weight = 1, f.Weight
 				return l.Layout(gtx)
 			}),
-		)
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if inBody == "" {
+					return layout.Dimensions{}
+				}
+				l := material.Label(u.th, u.th.TextSize*0.85, inBody)
+				l.Color, l.MaxLines = u.muted, 1
+				return layout.Inset{Left: 8}.Layout(gtx, l.Layout)
+			}),
+		)...)
 	})
 }
 

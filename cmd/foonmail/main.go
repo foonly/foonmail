@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"gioui.org/app"
@@ -184,7 +185,8 @@ func (u *ui) follow(events <-chan rpc.Event) {
 					u.refreshPaneRows()
 					u.pane.sel = min(sel, len(u.pane.rows)-1)
 				}
-				if id == u.folder.ID || (u.sent != nil && id == u.sent.ID) {
+				if id == u.folder.ID || (u.sent != nil && id == u.sent.ID) ||
+					(u.showingResults() && slices.Contains(u.server.order, id)) {
 					u.reload()
 				} else if u.isInbox(id) {
 					u.refreshInboxUnread() // another account's new mail
@@ -192,6 +194,10 @@ func (u *ui) follow(events <-chan rpc.Event) {
 			})
 		case rpc.StatusChanged:
 			u.refreshStatus()
+		case rpc.SearchFound:
+			u.post(func() { u.searchFound(ev) })
+		case rpc.SearchDone:
+			u.post(func() { u.searchDone(ev) })
 		}
 	}
 }

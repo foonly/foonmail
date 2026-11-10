@@ -22,7 +22,8 @@ type conversation struct {
 	latest   time.Time
 	unread   int // unread members in the current folder
 	flagged  bool
-	inFolder int // members in the current folder
+	inFolder int   // members in the current folder
+	folder   int64 // the folder it was built for; server search results come from several
 
 	// copies are further copies, in the current folder, of members shown
 	// once: the same message delivered more than once, as to several of
@@ -81,7 +82,7 @@ func buildConversations(entries []cache.Entry, folderID int64, own []string) []c
 				}
 			}
 		}
-		c := conversation{copies: copies}
+		c := conversation{copies: copies, folder: folderID}
 		for k, e := range byID {
 			c.members = append(c.members, e)
 			if e.FolderID == folderID {

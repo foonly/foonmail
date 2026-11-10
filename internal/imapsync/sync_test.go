@@ -786,3 +786,76 @@ func TestServerName(t *testing.T) {
 		t.Errorf("existing name: err = %v", err)
 	}
 }
+
+func (e *env) appendRaw(mailbox, msg string) {
+	e.t.Helper()
+	cmd := e.phone.Append(mailbox, int64(len(msg)), nil)
+	if _, err := cmd.Write([]byte(msg)); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := cmd.Close(); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := cmd.Wait(); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func TestSearch(t *testing.T) {
+	e := newEnv(t, "Sent", "Archive", "Trash")
+	e.appendTo("INBOX", "Invoice for March")
+	e.appendTo("Archive", "lunch")
+	e.appendTo("Archive", "Invoice for April")
+	e.appendRaw("Archive", "From: Kim <kim@example.org>\r\nSubject: paperwork\r\nMessage-ID: <body@example.org>\r\n"+
+		"Date: Wed, 04 Nov 2026 12:00:00 +0200\r\n\r\nThe invoice is attached.\r\n")
+	e.appendTo("Trash", "Invoice for May")
+	e.start()
+	defer e.stop()
+	e.eventually("folders listed", func() bool { _, ok := e.folder("Trash"); return ok })
+	trash, _ := e.folder("Trash")
+	if err := e.db.SetFolderInfo(context.Background(), trash.ID, "/", `\Trash`); err != nil {
+		t.Fatal(err)
+	}
+	e.eventually("INBOX synced", func() bool { return len(e.uids("INBOX")) == 1 })
+
+	var found []Found
+	if err := e.syncer.Search(reqCtx(t), []string{"invoice"}, func(f Found) { found = append(found, f) }); err != nil {
+		t.Fatal(err)
+	}
+	inbox, _ := e.folder("INBOX")
+	archive, _ := e.folder("Archive")
+	want := []Found{
+		{FolderID: inbox.ID, UIDs: []uint32{1}},
+		{FolderID: archive.ID, UIDs: []uint32{2}},
+		{FolderID: archive.ID, UIDs: []uint32{3}, InBody: true},
+	}
+	if fmt.Sprint(found) != fmt.Sprint(want) {
+		t.Errorf("found %v, want %v (INBOX first, headers before bodies, no Trash)", found, want)
+	}
+	// Archive was never synced: it now holds just the results.
+	if got := e.uids("Archive"); !slices.Equal(got, []uint32{2, 3}) {
+		t.Errorf("Archive in the cache = %v, want the two results", got)
+	}
+	if f, _ := e.folder("Archive"); f.UIDValidity == 0 || f.HighestModSeq != 0 {
+		t.Errorf("Archive sync state = %d/%d: want its UIDVALIDITY and no modseq", f.UIDValidity, f.HighestModSeq)
+	}
+	// A later sync fills in the rest.
+	if err := e.syncer.SyncFolder(reqCtx(t), archive.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.uids("Archive"); !slices.Equal(got, []uint32{1, 2, 3}) {
+		t.Errorf("Archive after a sync = %v", got)
+	}
+}
+
+func TestSearchCancel(t *testing.T) {
+	e := newEnv(t)
+	e.appendTo("INBOX", "Invoice")
+	e.start()
+	defer e.stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := e.syncer.Search(ctx, []string{"invoice"}, func(Found) { t.Error("found after cancel") }); err == nil {
+		t.Error("a cancelled search returned no error")
+	}
+}

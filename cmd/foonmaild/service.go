@@ -29,6 +29,7 @@ type backend interface {
 	AppendDraft(ctx context.Context, raw []byte) error
 	CreateFolder(ctx context.Context, name string) (int64, error)
 	DeleteFolder(ctx context.Context, folderID int64) error
+	Search(ctx context.Context, words []string, found func(imapsync.Found)) error
 }
 
 // service exports rpc.Interface on the session bus.
@@ -43,6 +44,8 @@ type service struct {
 	// syncNow makes every account reconnect and resync at once; nil in
 	// tests that don't need it.
 	syncNow func()
+
+	searches searches
 }
 
 // exportService puts the daemon's interface on conn and claims rpc.BusName.
@@ -60,6 +63,9 @@ func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob
 				{Name: "FolderChanged", Args: []introspect.Arg{{Name: "folder", Type: "x"}}},
 				{Name: "StatusChanged"},
 				{Name: "OutboxChanged"},
+				{Name: "SearchFound", Args: []introspect.Arg{{Name: "search", Type: "x"}, {Name: "folder", Type: "x"},
+					{Name: "uids", Type: "au"}, {Name: "inBody", Type: "b"}}},
+				{Name: "SearchDone", Args: []introspect.Arg{{Name: "search", Type: "x"}, {Name: "error", Type: "s"}}},
 			}},
 		},
 	}
