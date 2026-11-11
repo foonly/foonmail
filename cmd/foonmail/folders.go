@@ -414,6 +414,7 @@ func (u *ui) updateFolderPane(gtx layout.Context) {
 			key.Filter{Focus: t, Name: key.NameRightArrow},
 			key.Filter{Focus: t, Name: key.NameLeftArrow},
 			key.Filter{Focus: t, Name: key.NameEscape},
+			key.Filter{Focus: t, Name: "?", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: "C"},
 			key.Filter{Focus: t, Name: "N"},
 			key.Filter{Focus: t, Name: "D"},
@@ -432,6 +433,9 @@ func (u *ui) updateFolderPane(gtx layout.Context) {
 			u.notice = ""
 		}
 		switch ke.Name {
+		case "?":
+			u.openHelp()
+			return
 		case "N":
 			u.startNewFolder()
 		case "D", key.NameDeleteForward:

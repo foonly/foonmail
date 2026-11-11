@@ -144,7 +144,8 @@ from the server. The outbox lives in `~/.local/share/foonmail`.
 ## Using it
 
 Start foonmail from your launcher, or from the tray icon or a notification.
-The bottom line of the window always shows the keys for what you're doing.
+The bottom line of the window always shows the keys for what you're doing,
+and ? (F1 while writing) lists every key, with what it does.
 
 | In the message list | |
 |---|---|

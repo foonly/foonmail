@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter · Shift+F mail filters"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters"
+	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter · Shift+F mail filters · ? all keys"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters · ? all keys"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -56,6 +56,8 @@ func (u *ui) layout(gtx layout.Context) {
 			u.updateCompose(gtx)
 		case modeFilters:
 			u.updateFilters(gtx)
+		case modeHelp:
+			u.updateHelp(gtx)
 		}
 		if u.mode == m {
 			break
@@ -70,6 +72,8 @@ func (u *ui) layout(gtx layout.Context) {
 		u.layoutCompose(gtx)
 	case modeFilters:
 		u.layoutFilters(gtx)
+	case modeHelp:
+		u.layoutHelp(gtx)
 	}
 	u.releaseTextFocus(gtx)
 	if u.focusReq != nil {
@@ -106,11 +110,18 @@ func (u *ui) releaseTextFocus(gtx layout.Context) {
 
 func (u *ui) globalKeys(gtx layout.Context) {
 	for {
-		ev, ok := gtx.Event(key.Filter{Name: "Q", Required: key.ModCtrl})
+		ev, ok := gtx.Event(key.Filter{Name: "Q", Required: key.ModCtrl}, key.Filter{Name: key.NameF1})
 		if !ok {
 			return
 		}
-		if ke, ok := ev.(key.Event); ok && ke.State == key.Press && u.w != nil {
+		ke, ok := ev.(key.Event)
+		if !ok || ke.State != key.Press {
+			continue
+		}
+		switch {
+		case ke.Name == key.NameF1:
+			u.openHelp()
+		case u.w != nil:
 			u.w.Perform(system.ActionClose)
 		}
 	}
@@ -152,6 +163,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "R"},
 			key.Filter{Focus: t, Name: "G"},
 			key.Filter{Focus: t, Name: "F", Optional: key.ModShift},
+			key.Filter{Focus: t, Name: "?", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: key.NameEscape},
 			key.Filter{Focus: t, Name: "Q"},
 			key.Filter{Focus: t, Name: key.NameTab, Optional: key.ModShift},
@@ -164,6 +176,10 @@ func (u *ui) updateList(gtx layout.Context) {
 			continue
 		}
 		page := max(1, u.viewH/u.rowH-1)
+		if ke.Name == "?" {
+			u.openHelp()
+			continue
+		}
 		if u.showingResults() {
 			u.resultKey(ke, page)
 			continue
@@ -353,7 +369,7 @@ func (u *ui) layoutList(gtx layout.Context) layout.Dimensions {
 	case u.pane.open && len(u.pane.moving) > 0:
 		hints = "Move " + conversations(len(u.pane.moving)) + " to: j/k choose a folder · Enter or → moves · n new folder · Esc cancels"
 	case u.pane.open:
-		hints = "j/k preview a folder · Enter or → open and sync it · n new folder · d delete · Esc, c or ← back to " + u.pane.origin.Name
+		hints = "j/k preview a folder · Enter or → open and sync it · n new folder · d delete · Esc, c or ← back to " + u.pane.origin.Name + " · ? all keys"
 	case u.showingResults():
 		hints = resultHints
 	case u.searching:
@@ -602,6 +618,7 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "R"},
 			key.Filter{Name: "G"},
 			key.Filter{Name: "F", Optional: key.ModShift},
+			key.Filter{Name: "?", Optional: key.ModShift},
 			key.Filter{Name: "O"},
 			key.Filter{Name: "W"},
 			key.Filter{Name: "B"},
@@ -686,6 +703,8 @@ func (u *ui) updateView(gtx layout.Context) {
 			u.replyFromView(kindReplyAll)
 		case name == "V":
 			u.openMovePane()
+		case name == "?":
+			u.openHelp()
 		case name == "F" && ke.Modifiers.Contain(key.ModShift):
 			u.openFilters()
 		case name == "F":

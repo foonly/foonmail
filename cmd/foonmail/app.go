@@ -54,6 +54,7 @@ const (
 	modeView
 	modeCompose
 	modeFilters
+	modeHelp
 )
 
 // part is one message of the open conversation.
@@ -143,6 +144,7 @@ type ui struct {
 	similar       *similarSet        // the list narrowed to look-alikes of junked mail
 	server        *serverSearch      // Ctrl+Enter: server search results replace the list
 	filters       *filterView        // Shift+F: the account's mail filters
+	help          *helpView          // ? or F1: every key
 	onlyUnread    bool               // u: the list shows unread conversations only
 	wasUnread     map[string]bool    // conversations shown as unread since u, kept when read
 	markBase      map[string]bool    // the marks before the current Shift range

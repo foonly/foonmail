@@ -25,7 +25,7 @@ import (
 )
 
 const composeHints = "Ctrl+Enter send · Ctrl+S save to Drafts · Ctrl+E external editor · Ctrl+O attach · " +
-	"Ctrl+R remove last attachment · Tab next field · Esc twice discards"
+	"Ctrl+R remove last attachment · Tab next field · Esc twice discards · F1 all keys"
 
 // composer is the message being written.
 type composer struct {

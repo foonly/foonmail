@@ -434,6 +434,7 @@ func (u *ui) updateFilters(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "E"},
 			key.Filter{Focus: t, Name: "Y"},
 			key.Filter{Focus: t, Name: "Q"},
+			key.Filter{Focus: t, Name: "?", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: key.NameEscape},
 		)
 		if !ok {
@@ -442,6 +443,10 @@ func (u *ui) updateFilters(gtx layout.Context) {
 		ke, ok := ev.(key.Event)
 		if !ok || ke.State != key.Press {
 			continue
+		}
+		if ke.Name == "?" {
+			u.openHelp()
+			return
 		}
 		if fv.saving || fv.loading {
 			if ke.Name == key.NameEscape {
@@ -617,7 +622,7 @@ func (u *ui) filterHints() string {
 	if fv.sample.ok {
 		h += " (like the selected message)"
 	}
-	return h + " · d delete · Shift+j/k move up/down (the first match wins) · e edit as text · Esc back"
+	return h + " · d delete · Shift+j/k move up/down (the first match wins) · e edit as text · Esc back · ? all keys"
 }
 
 // layoutFilters draws the filter view.
