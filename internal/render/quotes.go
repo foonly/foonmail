@@ -23,13 +23,14 @@ var (
 	attributionRe = regexp.MustCompile(`(?i)(\b(wrote|kirjoitti|skrev|schrieb|schreef|napisał|escribió|ha scritto)|a écrit)\s*:\s*$` +
 		`|\b(skrev|schrieb)\s+.+:\s*$`)
 	// Outlook's plain-text separator and its header block.
-	outlookSep   = regexp.MustCompile(`^\s*(-{3,}\s*(Original Message|Alkuperäinen viesti|Ursprungligt meddelande|Ursprüngliche Nachricht)\s*-{3,}|_{10,})\s*$`)
+	outlookSep   = regexp.MustCompile(`^\s*(-{3,}\s*(Original Message|Alkuperäinen viesti|Ursprungligt meddelande|Ursprüngliche Nachricht|Forwarded message|Välitetty viesti|Vidarebefordrat meddelande|Weitergeleitete Nachricht)\s*-{3,}|_{10,})\s*$`)
 	outlookFrom  = regexp.MustCompile(`^\*?(From|Lähettäjä|Från|Von|De)\*?:\s*(.+)$`)
 	outlookDate  = regexp.MustCompile(`^\*?(Sent|Date|Lähetetty|Päivämäärä|Skickat|Datum|Gesendet|Envoyé)\*?:`)
 	outlookSubj  = regexp.MustCompile(`^\*?(Subject|Aihe|Ämne|Betreff|Objet)\*?:`)
 	wroteTail    = regexp.MustCompile(`(?i)\s*(\b(wrote|kirjoitti|skrev|schrieb|schreef|napisał|escribió|ha scritto)|a écrit)\s*:\s*$`)
 	verbFirst    = regexp.MustCompile(`(?i)\b(skrev|schrieb)\s+(.+?)\s*:\s*$`)
 	finnishTime  = regexp.MustCompile(`klo\s+\d{1,2}[.:]\d{2}\s+`)
+	clockTime    = regexp.MustCompile(`\b\d{1,2}[.:]\d{2}([.:]\d{2})?([\s\x{202f}\x{a0}]*[AaPp]\.?[Mm]\b\.?)?`)
 	angleOrParen = regexp.MustCompile(`\s*(<[^>]*>|\([^)]*\)|\[mailto:[^\]]*\])`)
 )
 
@@ -78,12 +79,29 @@ func findQuotes(text string) []Quote {
 			q.Attribution, q.Start = a, ls[start].start
 			q.Who = whoFromAttribution(a)
 		}
-		q.Trailing = strings.TrimSpace(text[q.End:]) == ""
+		q.Trailing = onlySignature(text[q.End:])
 		quotes = append(quotes, q)
 		i = j
 	}
 	return quotes
 }
+
+// onlySignature reports whether what follows a quote is nothing, or only
+// a signature ("-- " and a few lines), as when a signature is added below
+// the quote: the quote is still the end of the message.
+func onlySignature(rest string) bool {
+	t := strings.TrimSpace(rest)
+	if t == "" {
+		return true
+	}
+	if t != "--" && !strings.HasPrefix(t, "-- \n") && !strings.HasPrefix(t, "--\n") {
+		return false
+	}
+	return strings.Count(t, "\n") <= maxSignatureLines
+}
+
+// maxSignatureLines is the most a signature below a quote may have.
+const maxSignatureLines = 30
 
 // attribution looks for the "… wrote:" line just above quoted line i,
 // allowing one blank line between and an attribution wrapped over two lines.
@@ -139,7 +157,10 @@ func whoFromAttribution(a string) string {
 		name = s[:strings.Index(s, addr)]
 	}
 	name = strings.TrimRight(strings.TrimSpace(name), ",")
-	if i := strings.LastIndex(name, ", "); i >= 0 {
+	if locs := clockTime.FindAllStringIndex(name, -1); locs != nil {
+		// The name follows the time: "On Mon, Nov 2, 2026 at 10:12 AM Monica".
+		name = strings.TrimLeft(name[locs[len(locs)-1][1]:], ", ")
+	} else if i := strings.LastIndex(name, ", "); i >= 0 {
 		name = name[i+2:]
 	}
 	name = cleanName(leadingTime.ReplaceAllString(strings.TrimSpace(name), ""))

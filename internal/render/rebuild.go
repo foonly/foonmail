@@ -75,6 +75,10 @@ func rebuildLevel(region string) (r Rebuilt, next string, ok bool) {
 		first++
 	}
 	var body string
+	if r, body, ok = outlookHeader(strings.Join(lineTexts(ls), "\n")); ok {
+		// A forward's or Outlook's "From: / Date: / Subject:" block.
+		return finishLevel(r, body)
+	}
 	switch {
 	case first < len(ls) && first > 0:
 		// "On …, Bob <bob@example.com> wrote:" above ">" lines.
@@ -84,6 +88,9 @@ func rebuildLevel(region string) (r Rebuilt, next string, ok bool) {
 				attr = append(attr, t)
 			}
 		}
+		if len(attr) > 2 {
+			return r, "", false // more than a (wrapped) attribution line above the quote
+		}
 		a := strings.Join(attr, " ")
 		if !attributionRe.MatchString(a) {
 			return r, "", false
@@ -92,18 +99,18 @@ func rebuildLevel(region string) (r Rebuilt, next string, ok bool) {
 		body = unquote(ls[first:])
 	case first == 0:
 		// Quoted with no attribution: only an Outlook header inside says who.
-		body = unquote(ls)
-		var ok bool
-		if r, body, ok = outlookHeader(body); !ok {
+		if r, body, ok = outlookHeader(unquote(ls)); !ok {
 			return r, "", false
 		}
 	default:
-		// Not quoted at all: Outlook's plain-text form.
-		var ok bool
-		if r, body, ok = outlookHeader(strings.Join(lineTexts(ls), "\n")); !ok {
-			return r, "", false
-		}
+		return r, "", false
 	}
+	return finishLevel(r, body)
+}
+
+// finishLevel completes a level once its sender is known: the time read,
+// the text up to the next quoted message, and that quote.
+func finishLevel(r Rebuilt, body string) (Rebuilt, string, bool) {
 	if r.Who == "" && r.Addr == "" {
 		return r, "", false
 	}
@@ -136,6 +143,9 @@ func rebuildLevel(region string) (r Rebuilt, next string, ok bool) {
 	}
 	q := qs[len(qs)-1]
 	r.Text = strings.TrimSpace(body[:q.Start])
+	if sig := strings.TrimSpace(body[q.End:]); sig != "" {
+		r.Text += "\n\n" + sig // a signature below the quote
+	}
 	return r, body[q.Start:q.End], true
 }
 
@@ -181,7 +191,7 @@ func outlookHeader(text string) (r Rebuilt, body string, ok bool) {
 			break
 		}
 		if m := outlookFrom.FindStringSubmatch(t); m != nil {
-			v := linkMark.ReplaceAllString(m[2], "")
+			v := strings.TrimLeft(linkMark.ReplaceAllString(m[2], ""), "* ") // "*From:* Bob", bold in plain text
 			r.Addr = strings.TrimPrefix(addrRe.FindString(v), "mailto:")
 			r.Who = cleanName(v)
 			if strings.Contains(r.Who, "@") {
@@ -247,6 +257,7 @@ var whenLayouts = []string{
 	"Mon, 2 Jan 2006 at 15:04",
 	"Mon, 2 Jan 2006 at 15.04",
 	"Mon, Jan 2, 2006 at 3:04 PM",
+	"Mon, Jan 2, 2006 at 3:04PM",
 	"Mon, Jan 2, 2006, 3:04 PM",
 	"Mon, 2 Jan 2006 15:04",
 	"Mon, 2 Jan 2006 15:04:05 -0700",
@@ -259,6 +270,9 @@ var whenLayouts = []string{
 	"Monday, 2 January 2006 15:04",
 	"Monday, 2 January 2006 at 15:04",
 	"2.1.2006 klo 15.04",
+	"Mon 2. Jan 2006 at 15.04",
+	"Mon 2. Jan 2006 at 15:04",
+	"2. Jan 2006 at 15.04",
 	"2.1.2006 15.04",
 	"2006-01-02 15:04",
 }

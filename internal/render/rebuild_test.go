@@ -110,3 +110,53 @@ func TestRebuildOther(t *testing.T) {
 		t.Errorf("finnish date = %v", d)
 	}
 }
+
+// TestRebuildForwardedChain is shaped like a Gmail forward of a thread that
+// went through Outlook: a "Forwarded message" header block, US-style
+// attributions with a narrow space before AM, Outlook's bold "*From:*"
+// block, and signatures written below the quotes.
+func TestRebuildForwardedChain(t *testing.T) {
+	sig := "--\n\n*Liisa Example*\n\nExample Oy\nExample Street 1\n00100 Helsinki\nliisa@example.com | www.example.org\n"
+	text := "---------- Forwarded message ---------\nFrom: Bob Example <bob@example.com>\nDate: Mon 2. Nov 2026 at 9.57\n" +
+		"Subject: Re: Problem\nTo: Liisa Example <liisa@example.com>\n\n\nHello,\n\nIt still fails.\n\nBob\n\n" +
+		"On Mon, Nov 2, 2026 at 8:58 AM Liisa Example <liisa@example.com>\nwrote:\n\n" +
+		"> Hi,\n>\n> Try again now.\n>\n> Liisa\n>\n>\n" +
+		"> On Mon, Nov 2, 2026 at 8:43 AM Bob Example <bob@example.com>\n> wrote:\n>\n" +
+		">> Did you see my mail?\n>>\n" +
+		">> *From:* Liisa Example <liisa@example.com>\n>> *Sent:* Monday, 26 October 2026 16:26\n>> *To:* Bob\n>> *Subject:* Problem\n>>\n" +
+		">> We are looking into it.\n>>\n" +
+		"> " + strings.ReplaceAll(strings.TrimSuffix(sig, "\n"), "\n", "\n> ") + "\n\n" + sig
+	m := plainMessage(t, text)
+	var got []string
+	for _, r := range Rebuild(m) {
+		first, _, _ := strings.Cut(r.Text, "\n")
+		date := "?"
+		if !r.Date.IsZero() {
+			date = r.Date.Format("2 Jan 15:04")
+		}
+		got = append(got, r.Who+" "+date+": "+first)
+	}
+	want := []string{
+		"Liisa Example 26 Oct 16:26: We are looking into it.",
+		"Bob Example 2 Nov 08:43: Did you see my mail?",
+		"Liisa Example 2 Nov 08:58: Hi,",
+		"Bob Example 2 Nov 09:57: Hello,",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestSignatureBelowQuote checks that a quote followed only by the
+// writer's signature still counts as the end of the reply, to be folded.
+func TestSignatureBelowQuote(t *testing.T) {
+	text := "Fixed now.\n\nOn Mon, Nov 2, 2026 at 10:12 AM Liisa Example <liisa@example.com> wrote:\n\n> Can you look?\n\n-- \n\nKim Example\n"
+	qs := findQuotes(tidy(text))
+	if len(qs) != 1 || !qs[0].Trailing || qs[0].Who != "Liisa Example" {
+		t.Errorf("quotes = %+v", qs)
+	}
+	// More than a signature after it: answers below the quote.
+	if qs := findQuotes(tidy("> Can you look?\n\nYes, tomorrow.\n")); len(qs) != 1 || qs[0].Trailing {
+		t.Errorf("bottom-posted answer: %+v", qs)
+	}
+}
