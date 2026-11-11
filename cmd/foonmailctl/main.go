@@ -22,6 +22,7 @@ import (
 
 	"foonmail/internal/config"
 	"foonmail/internal/rpc"
+	"foonmail/internal/version"
 )
 
 const usage = `usage:
@@ -32,6 +33,7 @@ const usage = `usage:
   foonmailctl undo ID
   foonmailctl resolve ID resend|sent
   foonmailctl passwords [-check] [-change ACCOUNT] [-no-verify]
+  foonmailctl version
 `
 
 func main() {
@@ -45,6 +47,10 @@ func run(args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+	if args[0] == "version" || args[0] == "-version" || args[0] == "--version" {
+		fmt.Println("foonmailctl", version.String())
+		return nil
 	}
 	if args[0] == "passwords" {
 		return runPasswords(args[1:]) // needs the keyring, not the daemon

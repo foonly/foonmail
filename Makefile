@@ -7,6 +7,11 @@ TAGS ?= novulkan
 GO   ?= go
 GOFLAGS_ALL = -tags=$(TAGS)
 
+# The version built in: the git tag (v1.2.3), or the tag plus commits since
+# and -dirty between releases. foonver makes the tags; see README.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
+LDFLAGS  = -X foonmail/internal/version.Version=$(VERSION)
+
 BIN      := bin
 COMMANDS := foonmaild foonmail foonmailctl
 
@@ -18,7 +23,7 @@ all: build
 build: $(addprefix $(BIN)/,$(COMMANDS))
 
 $(BIN)/%: FORCE
-	$(GO) build $(GOFLAGS_ALL) -o $@ ./cmd/$*
+	$(GO) build $(GOFLAGS_ALL) -ldflags '$(LDFLAGS)' -o $@ ./cmd/$*
 
 ## test: run all tests
 test:

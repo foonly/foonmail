@@ -27,13 +27,19 @@ import (
 	"foonmail/internal/rpc"
 	"foonmail/internal/secrets"
 	"foonmail/internal/tray"
+	"foonmail/internal/version"
 )
 
 func main() {
 	defaultPath, _ := config.Path()
 	configPath := flag.String("config", defaultPath, "configuration file")
 	verbose := flag.Bool("v", false, "log debug messages")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("foonmaild", version.String())
+		return
+	}
 
 	level := slog.LevelInfo
 	if *verbose {
@@ -165,7 +171,7 @@ func run(configPath string, log *slog.Logger) error {
 			s.Run(ctx, waker.Subscribe(), waker.Subscribe())
 		}()
 	}
-	log.Info("foonmaild started", "accounts", len(cfg.Accounts), "cache", cfg.CacheDir)
+	log.Info("foonmaild started", "version", version.String(), "accounts", len(cfg.Accounts), "cache", cfg.CacheDir)
 	<-ctx.Done()
 	log.Info("shutting down")
 	wg.Wait()

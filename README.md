@@ -241,6 +241,25 @@ they never touch your real mail or desktop. A few optional tests read your
 own cache. To run them, copy `local.test.env.example` to `local.test.env`
 (it is gitignored) and fill it in.
 
+### Commits and releases
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
+`feat: …` for a new feature, `fix(render): …` for a fix, `docs:`, `test:`,
+`refactor:`, `build:`, `ci:` and so on, with `!` or a `BREAKING CHANGE:`
+footer for an incompatible change. foonver
+reads them to pick the next version:
+
+```sh
+foonver auto      # next version from the commits; updates CHANGELOG.md, tags and pushes
+foonver auto --dry-run
+```
+
+`.foonver.toml` turns on the changelog and pushing. Pushing a `v*` tag
+runs the release workflow, which tests, builds and publishes a GitHub
+release with a linux/amd64 tarball and that version's changelog section.
+The programs report their version with `-version` (`foonmailctl version`);
+`make` builds it in from `git describe`.
+
 ## License
 
 Copyright © 2026 Niklas Schönberg

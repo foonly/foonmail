@@ -1,0 +1,66 @@
+# Builds and publishes a release when a version tag is pushed. Tags come
+# from foonver (see README), which also writes the CHANGELOG.md section the
+# release notes are taken from.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install build dependencies
+        # Gio's Wayland/X11 and OpenGL ES headers; dbus-daemon for the tests.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
+            libxfixes-dev dbus
+
+      - name: Test
+        run: make check
+
+      - name: Build
+        run: make build VERSION="${GITHUB_REF_NAME}"
+
+      - name: Package
+        run: |
+          name="foonmail_${GITHUB_REF_NAME}_linux_amd64"
+          mkdir -p "dist/$name"
+          cp bin/foonmaild bin/foonmail bin/foonmailctl README.md LICENSE config.example.toml "dist/$name/"
+          cp -r contrib "dist/$name/"
+          [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > SHA256SUMS)
+
+      - name: Release notes
+        # This version's section of CHANGELOG.md, headed "## v1.2.3 (date)"
+        # (or "## 1.2.3" for the first release).
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v ver="$ver" '
+            $1 == "##" && ($2 == ver || $2 == "v" ver) { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md 2>/dev/null || true
+          if [ ! -s notes.md ]; then echo "Release ${GITHUB_REF_NAME}." > notes.md; fi
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file notes.md \
+            "dist/foonmail_${GITHUB_REF_NAME}_linux_amd64.tar.gz" dist/SHA256SUMS

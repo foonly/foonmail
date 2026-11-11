@@ -28,13 +28,19 @@ import (
 	"foonmail/internal/config"
 	"foonmail/internal/desktop"
 	"foonmail/internal/rpc"
+	"foonmail/internal/version"
 )
 
 func main() {
 	defaultPath, _ := config.Path()
 	configPath := flag.String("config", defaultPath, "configuration file")
 	accountName := flag.String("account", "", "account to show (default: the first)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("foonmail", version.String())
+		return
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	u, cleanup, err := setup(*configPath, *accountName, log)
