@@ -60,6 +60,7 @@ const (
 // part is one message of the open conversation.
 type part struct {
 	entry    cache.Entry
+	unread   bool // when the conversation was opened; it stays shown as new
 	loading  bool
 	err      error
 	rendered *render.Message
@@ -160,6 +161,7 @@ type ui struct {
 	muted, line, barBg, accent color.NRGBA
 	selBg, selBgBlurred        color.NRGBA
 	markBg                     color.NRGBA   // a marked conversation's row
+	newBg                      color.NRGBA   // behind a message that was unread when opened
 	quoteColors                []color.NRGBA // by quote depth, repeating
 }
 
@@ -344,19 +346,31 @@ func (u *ui) rowAt(y int) int {
 // message (or the last one), and marks its messages in the folder read.
 // Bodies are fetched and rendered in the background, in order, so link
 // numbers run on from one message to the next.
-func (u *ui) open() {
+func (u *ui) open() { u.openAt(0, 0) }
+
+// openAt opens the selected conversation at one of its messages, such as
+// the one a notification was about; with folderID 0, or if the message
+// isn't in it, at the first unread message or else the last.
+func (u *ui) openAt(folderID int64, uid uint32) {
 	c := u.current()
 	if c == nil {
 		return
 	}
 	o := &openConv{conv: *c, heights: map[int]int{}}
 	o.list.Axis = layout.Vertical
-	target := -1
+	target, firstUnread := -1, -1
 	for i, m := range c.members {
-		o.parts = append(o.parts, &part{entry: m, loading: true})
-		if target < 0 && m.FolderID == u.folder.ID && unread(m.Summary) {
+		isNew := m.FolderID == u.folder.ID && unread(m.Summary)
+		o.parts = append(o.parts, &part{entry: m, unread: isNew, loading: true})
+		if folderID != 0 && m.FolderID == folderID && m.UID == uid {
 			target = i
 		}
+		if firstUnread < 0 && isNew {
+			firstUnread = i
+		}
+	}
+	if target < 0 {
+		target = firstUnread
 	}
 	if target < 0 {
 		target = len(c.members) - 1

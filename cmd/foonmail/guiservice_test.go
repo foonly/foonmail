@@ -68,3 +68,60 @@ func TestGUIServiceShowsMessagesAndIsSingleInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestShowMessageOpensAtThatMessage checks that a notification opens the
+// conversation at its message, not at the first unread one, with the
+// keys working, and that the messages new when it opened stay shown so.
+func TestShowMessageOpensAtThatMessage(t *testing.T) {
+	h := newHarness(t)
+	h.u.searching = true // the filter had focus
+	h.u.focusReq = &h.u.search
+	h.frame()
+
+	h.u.showMessage(h.inbox.ID, 1) // Bob's first message, already read
+	h.frame()
+	o := h.u.conv
+	if h.u.mode != modeView || o == nil || o.conv.key != "a" {
+		t.Fatalf("mode %v, conv %v", h.u.mode, o)
+	}
+	if e := o.parts[o.cur].entry; e.FolderID != h.inbox.ID || e.UID != 1 {
+		t.Errorf("current message is %d/%d, want the notified one", e.FolderID, e.UID)
+	}
+	if o.list.Position.First != o.cur {
+		t.Errorf("scrolled to %d, current is %d", o.list.Position.First, o.cur)
+	}
+	var news []uint32
+	for _, p := range o.parts {
+		if p.unread {
+			news = append(news, p.entry.UID)
+		}
+	}
+	if len(news) != 1 || news[0] != 2 {
+		t.Errorf("new messages %v, want [2]", news)
+	}
+	h.eventually("loaded", h.loaded)
+	h.eventually("marked read", func() bool {
+		for _, e := range h.u.entries {
+			if e.UID == 2 && e.FolderID == h.inbox.ID {
+				return !unread(e.Summary)
+			}
+		}
+		return false
+	})
+	if !o.parts[2].unread {
+		t.Error("the message stopped being shown as new once read")
+	}
+
+	// The keys go to the conversation: n moves to the next message.
+	h.press("N")
+	if o.cur != 1 {
+		t.Errorf("after n, current is %d", o.cur)
+	}
+
+	// Without a message to go to, the first unread one is current.
+	h.press(key.NameEscape)
+	h.u.open()
+	if c := h.u.conv; c.parts[c.cur].entry.UID != 2 {
+		t.Errorf("plain open: current UID %d", c.parts[c.cur].entry.UID)
+	}
+}

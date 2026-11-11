@@ -840,22 +840,32 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 	width := max(40, gtx.Constraints.Max.X/max(1, gtx.Sp(u.th.TextSize)*6/10))
 	dims := material.List(u.th, &o.list).Layout(gtx, len(o.parts), func(gtx layout.Context, i int) layout.Dimensions {
 		inset := layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}
-		if i != o.cur || len(o.parts) < 2 {
-			d := inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+		p := o.parts[i]
+		current := i == o.cur && len(o.parts) > 1
+		if !current && !p.unread {
+			d := inset.Layout(gtx, u.partWidget(o, p, i, width))
 			o.heights[i] = d.Size.Y
 			return d
 		}
-		// The current message gets a bar down its left side.
 		m := op.Record(gtx.Ops)
-		d := inset.Layout(gtx, u.partWidget(o, o.parts[i], i, width))
+		d := inset.Layout(gtx, u.partWidget(o, p, i, width))
 		call := m.Stop()
 		o.heights[i] = d.Size.Y
 		top := gtx.Dp(inset.Top)
 		if i > 0 {
 			top += gtx.Dp(1) // below the divider
 		}
-		bar := image.Rect(gtx.Dp(5), top, gtx.Dp(8), d.Size.Y-gtx.Dp(inset.Bottom))
-		paint.FillShape(gtx.Ops, u.accent, clip.UniformRRect(bar, gtx.Dp(1)).Op(gtx.Ops))
+		if p.unread {
+			// A message that was new when the conversation opened is tinted,
+			// so what arrived since last time stands out even once it is read.
+			bg := image.Rect(0, top, d.Size.X, d.Size.Y)
+			paint.FillShape(gtx.Ops, u.newBg, clip.Rect(bg).Op())
+		}
+		if current {
+			// The current message gets a bar down its left side.
+			bar := image.Rect(gtx.Dp(5), top, gtx.Dp(8), d.Size.Y-gtx.Dp(inset.Bottom))
+			paint.FillShape(gtx.Ops, u.accent, clip.UniformRRect(bar, gtx.Dp(1)).Op(gtx.Ops))
+		}
 		call.Add(gtx.Ops)
 		return d
 	})
@@ -894,6 +904,14 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if !p.unread {
+									return layout.Dimensions{}
+								}
+								l := material.Label(u.th, u.th.TextSize, "● ")
+								l.Color = u.accent
+								return l.Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								l := material.Label(u.th, u.th.TextSize, who)
 								l.Font.Weight, l.MaxLines, l.Color = font.Bold, 1, nameColor
 								return l.Layout(gtx)
@@ -907,10 +925,16 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 								return l.Layout(gtx)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if !sent {
+								what := ""
+								switch {
+								case sent:
+									what = "sent · "
+								case p.unread:
+									what = "new · "
+								default:
 									return layout.Dimensions{}
 								}
-								l := material.Label(u.th, u.th.TextSize*0.9, "sent · ")
+								l := material.Label(u.th, u.th.TextSize*0.9, what)
 								l.Color = u.accent
 								return l.Layout(gtx)
 							}),

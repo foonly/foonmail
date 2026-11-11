@@ -119,7 +119,7 @@ func (u *ui) showMessage(folderID int64, uid uint32) {
 			if m.FolderID == folderID && m.UID == uid {
 				u.sel = vi
 				u.ensureVisible()
-				u.open()
+				u.openAt(folderID, uid)
 				return
 			}
 		}

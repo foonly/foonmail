@@ -105,6 +105,7 @@ var helpSections = []helpSection{
 	},
 	{
 		title: "Reading a conversation",
+		intro: "Messages that were unread when you opened the conversation are tinted and marked ● and new, even after they are marked read. The current message has a bar down its left side.",
 		keys: [][2]string{
 			{"n / p", "Next or previous message in the conversation."},
 			{"↓ / ↑", "Scroll through a long message, then go on to the next or previous one."},
