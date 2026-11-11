@@ -816,8 +816,11 @@ func (u *ui) convHeader(gtx layout.Context) layout.Dimensions {
 		subject = "(no subject)"
 	}
 	info := o.conv.people
-	if n := len(o.parts); n > 1 {
+	if n := len(o.parts) - o.rebuilt; n > 1 {
 		info = fmt.Sprintf("%d messages · %s", n, info)
+	}
+	if o.rebuilt > 0 {
+		info += fmt.Sprintf(" · %d rebuilt from quotes", o.rebuilt)
 	}
 	return layout.Inset{Top: 12, Bottom: 12, Left: 16, Right: 16}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -848,7 +851,7 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 		inset := layout.Inset{Top: 8, Bottom: 8, Left: 16, Right: 16}
 		p := o.parts[i]
 		current := i == o.cur && len(o.parts) > 1
-		if !current && !p.unread {
+		if !current && !p.unread && p.rebuilt == nil {
 			d := inset.Layout(gtx, u.partWidget(o, p, i, width))
 			o.heights[i] = d.Size.Y
 			return d
@@ -867,9 +870,23 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 			bg := image.Rect(0, top, d.Size.X, d.Size.Y)
 			paint.FillShape(gtx.Ops, u.newBg, clip.Rect(bg).Op())
 		}
-		if current {
+		bottom := d.Size.Y - gtx.Dp(inset.Bottom)
+		switch {
+		case p.rebuilt != nil:
+			// A message rebuilt from a quote gets a dashed bar, in the
+			// accent color when it is the current one.
+			c := u.muted
+			if current {
+				c = u.accent
+			}
+			dash, gap := gtx.Dp(6), gtx.Dp(4)
+			for y := top; y < bottom; y += dash + gap {
+				seg := image.Rect(gtx.Dp(5), y, gtx.Dp(8), min(y+dash, bottom))
+				paint.FillShape(gtx.Ops, c, clip.UniformRRect(seg, gtx.Dp(1)).Op(gtx.Ops))
+			}
+		case current:
 			// The current message gets a bar down its left side.
-			bar := image.Rect(gtx.Dp(5), top, gtx.Dp(8), d.Size.Y-gtx.Dp(inset.Bottom))
+			bar := image.Rect(gtx.Dp(5), top, gtx.Dp(8), bottom)
 			paint.FillShape(gtx.Ops, u.accent, clip.UniformRRect(bar, gtx.Dp(1)).Op(gtx.Ops))
 		}
 		call.Add(gtx.Ops)
@@ -885,6 +902,9 @@ func (u *ui) convBody(gtx layout.Context) layout.Dimensions {
 // partWidget draws one message of a conversation: who and when, the body,
 // then its links and attachments.
 func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
+	if p.rebuilt != nil {
+		return u.rebuiltWidget(o, p, i)
+	}
 	return func(gtx layout.Context) layout.Dimensions {
 		e := p.entry
 		who, addr := senderName(e.From), ""
@@ -1133,4 +1153,74 @@ func (u *ui) spanColors(spans []textSpan) []colorSpan {
 		out = append(out, colorSpan{start: s.start, end: s.end, color: c})
 	}
 	return out
+}
+
+// rebuiltWidget draws a message rebuilt from a quote: muted, with the
+// time as the quote wrote it, and a line saying it isn't a real message.
+func (u *ui) rebuiltWidget(o *openConv, p *part, i int) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		r := p.rebuilt
+		nameColor := u.muted
+		if i == o.cur {
+			nameColor = u.accent
+		}
+		when := r.When
+		if !r.Date.IsZero() {
+			when = r.Date.Format("Mon, 2 Jan 2006 15:04")
+		}
+		addr := ""
+		if r.Addr != "" && r.Addr != r.Who {
+			addr = "  " + r.Addr
+		}
+		small := func(s string, c color.NRGBA) layout.Widget {
+			return func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(u.th, u.th.TextSize*0.9, s)
+				l.Color, l.MaxLines = c, 1
+				return l.Layout(gtx)
+			}
+		}
+		var rows []layout.FlexChild
+		if i > 0 {
+			rows = append(rows, layout.Rigid(u.divider))
+		}
+		rows = append(rows,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									l := material.Label(u.th, u.th.TextSize, r.Who)
+									l.Font.Weight, l.MaxLines, l.Color = font.Bold, 1, nameColor
+									return l.Layout(gtx)
+								}),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									if addr == "" {
+										return layout.Dimensions{Size: image.Pt(gtx.Constraints.Min.X, 0)}
+									}
+									return small(addr, u.muted)(gtx)
+								}),
+								layout.Rigid(small("rebuilt · ", u.muted)),
+								layout.Rigid(small(when, u.muted)),
+							)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							s := "Not a real message: read back from the quote in " + senderName(p.source.entry.From) + "'s reply below"
+							l := material.Label(u.th, u.th.TextSize*0.85, s)
+							l.Color, l.Font.Style = u.muted, font.Italic
+							return layout.Inset{Top: 2}.Layout(gtx, l.Layout)
+						}),
+					)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				text := r.Text
+				if strings.TrimSpace(text) == "" {
+					text = "(The quote has no text.)"
+				}
+				return u.coloredText(gtx, &p.body, u.mono, u.th.TextSize, text, []colorSpan{{0, len(text), u.muted}})
+			}),
+		)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+	}
 }

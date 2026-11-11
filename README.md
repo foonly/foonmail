@@ -32,6 +32,9 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   instead.
 - Color for links, quoted text (by depth), attributions and signatures.
   Quoted text at the end of a reply is folded away until you press h.
+- Conversations you were added to late: the earlier messages are read back
+  from the quote in the reply and shown before it, muted with a dashed bar,
+  marked as rebuilt rather than real.
 - Writing in the window or in your own editor, with drafts, attachments,
   replies, reply-all and forwarding. Sent mail waits 5 seconds before it
   goes, so you can take it back (`undo_delay` in the config changes that).

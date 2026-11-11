@@ -19,7 +19,7 @@ import (
 func (u *ui) attachment(o *openConv, save bool) {
 	typed := o.linkInput
 	o.linkInput = ""
-	p := o.parts[min(max(o.cur, 0), len(o.parts)-1)]
+	p := o.acting()
 	if p.rendered == nil {
 		u.notice = "The message is still loading"
 		return
@@ -94,7 +94,7 @@ func (u *ui) writeAttachment(p *part, a render.Attachment, name string, save boo
 // loading nothing from the network.
 func (u *ui) openInBrowser(o *openConv) {
 	o.linkInput = ""
-	p := o.parts[min(max(o.cur, 0), len(o.parts)-1)]
+	p := o.acting()
 	m := p.rendered
 	switch {
 	case m == nil:

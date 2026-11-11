@@ -126,11 +126,27 @@ func whoFromAttribution(a string) string {
 	}
 	s := wroteTail.ReplaceAllString(a, "")
 	if loc := finnishTime.FindStringIndex(s); loc != nil {
-		s = s[loc[1]:]
-	} else if i := strings.LastIndex(s, ", "); i >= 0 {
-		s = s[i+2:]
+		return cleanName(s[loc[1]:])
 	}
-	return cleanName(s)
+	// The name is what comes before the address, after the date: "On Tue,
+	// 3 Nov 2026 at 14:02, Bob <bob@…>", and Gmail on phones writes
+	// "On Wed, 11 Nov 2026, 16.32 Bob, <bob@…>", time first.
+	addr := strings.TrimPrefix(addrRe.FindString(s), "mailto:")
+	name := s
+	if loc := angleOrParen.FindStringIndex(s); loc != nil {
+		name = s[:loc[0]]
+	} else if addr != "" {
+		name = s[:strings.Index(s, addr)]
+	}
+	name = strings.TrimRight(strings.TrimSpace(name), ",")
+	if i := strings.LastIndex(name, ", "); i >= 0 {
+		name = name[i+2:]
+	}
+	name = cleanName(leadingTime.ReplaceAllString(strings.TrimSpace(name), ""))
+	if name == "" || hasDigit.MatchString(name) {
+		return addr // no name, only a date before the address
+	}
+	return name
 }
 
 func cleanName(s string) string {

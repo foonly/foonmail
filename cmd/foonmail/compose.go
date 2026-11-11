@@ -182,7 +182,7 @@ func (u *ui) replyFromView(kind replyKind) {
 	if o == nil || len(o.parts) == 0 {
 		return
 	}
-	p := o.parts[min(max(o.cur, 0), len(o.parts)-1)]
+	p := o.acting() // a rebuilt message is answered through the reply that quoted it
 	u.replyTo(p.entry, p.rendered, kind)
 }
 

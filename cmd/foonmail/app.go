@@ -65,6 +65,12 @@ type part struct {
 	err      error
 	rendered *render.Message
 	body     widget.Selectable
+
+	// rebuilt is set on an earlier message that isn't at hand, read back
+	// from the quote in source, a real message of the conversation. Its
+	// entry is source's, so anything done to it is done to the real one.
+	rebuilt *render.Rebuilt
+	source  *part
 }
 
 // openConv is the conversation being read.
@@ -76,6 +82,17 @@ type openConv struct {
 	heights    map[int]int // each message's height in px when last drawn
 	linkInput  string      // digits typed: a link (Enter) or attachment (o, w) number
 	list       widget.List
+	rebuilt    int // parts rebuilt from quotes
+}
+
+// acting returns the message that the current one stands for: itself, or
+// for a message rebuilt from a quote, the real one it was read from.
+func (o *openConv) acting() *part {
+	p := o.parts[min(max(o.cur, 0), len(o.parts)-1)]
+	if p.source != nil {
+		return p.source
+	}
+	return p
 }
 
 func (o *openConv) links() []render.Link {
@@ -379,10 +396,12 @@ func (u *ui) openAt(folderID int64, uid uint32) {
 	u.conv, u.mode = o, modeView
 
 	toMark := c.folderUIDs(u.folder.ID, true)
+	parts := slices.Clone(o.parts) // rebuilt messages are inserted into o.parts meanwhile
+	known := slices.Concat(c.members, c.copies)
 	go func() {
 		var earlier []render.Link // the same address keeps its number across messages
 		anyShown := false
-		for _, p := range o.parts {
+		for _, p := range parts {
 			raw, err := u.loadRaw(p.entry.Summary)
 			var r *render.Message
 			if err == nil {
@@ -392,7 +411,11 @@ func (u *ui) openAt(folderID int64, uid uint32) {
 				earlier = append(earlier, r.Links...)
 				anyShown = true
 			}
-			u.post(func() { p.loading, p.rendered, p.err = false, r, err })
+			rebuilt := rebuildMissing(p.entry, r, known)
+			u.post(func() {
+				p.loading, p.rendered, p.err = false, r, err
+				o.insertRebuilt(p, rebuilt)
+			})
 		}
 		if anyShown && len(toMark) > 0 {
 			u.post(func() { u.setSeen(toMark, true) })
@@ -657,4 +680,76 @@ func (u *ui) toggleUnreadOnly() {
 	if u.onlyUnread && len(u.view) == 0 {
 		u.notice = "No unread conversations in " + u.folder.Name
 	}
+}
+
+// rebuildMissing reads back the earlier messages quoted in r when the
+// message it answers isn't in the conversation, as when you were added to
+// it later. Quoted messages from the newest down to one already in the
+// conversation are kept: that one and those before it are at hand.
+func rebuildMissing(e cache.Entry, r *render.Message, known []cache.Entry) []render.Rebuilt {
+	if r == nil || e.InReplyTo == "" {
+		return nil
+	}
+	for _, k := range known {
+		if k.MessageID == e.InReplyTo {
+			return nil
+		}
+	}
+	rb := render.Rebuild(r)
+	for i := len(rb) - 1; i >= 0; i-- {
+		if slices.ContainsFunc(known, func(k cache.Entry) bool { return sameMessage(rb[i], k) }) {
+			return rb[i+1:]
+		}
+	}
+	return rb
+}
+
+// sameMessage guesses whether a rebuilt message is k: the same sender, at
+// the same time as far as the quote's minutes tell.
+func sameMessage(r render.Rebuilt, k cache.Entry) bool {
+	if r.Addr == "" || !strings.EqualFold(r.Addr, k.From.Addr) {
+		return false
+	}
+	if r.Date.IsZero() {
+		return true
+	}
+	d := k.Date.Sub(r.Date)
+	return d > -2*time.Minute && d < 2*time.Minute
+}
+
+// insertRebuilt puts the messages rebuilt from p's quote just before it,
+// keeping the view where it was. Ones already shown, rebuilt from another
+// reply quoting the same messages, are left out.
+func (o *openConv) insertRebuilt(p *part, rb []render.Rebuilt) {
+	at := slices.Index(o.parts, p)
+	if at < 0 || len(rb) == 0 {
+		return
+	}
+	var add []*part
+	for i := range rb {
+		dup := slices.ContainsFunc(o.parts, func(q *part) bool { return q.rebuilt != nil && *q.rebuilt == rb[i] })
+		if !dup {
+			add = append(add, &part{entry: p.entry, rebuilt: &rb[i], source: p})
+		}
+	}
+	n := len(add)
+	if n == 0 {
+		return
+	}
+	o.parts = slices.Insert(o.parts, at, add...)
+	o.rebuilt += n
+	if o.cur >= at {
+		o.cur += n
+	}
+	if o.list.Position.First >= at {
+		o.list.Position.First += n
+	}
+	heights := make(map[int]int, len(o.heights))
+	for i, h := range o.heights {
+		if i >= at {
+			i += n
+		}
+		heights[i] = h
+	}
+	o.heights = heights
 }
