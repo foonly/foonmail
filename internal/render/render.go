@@ -22,6 +22,8 @@ import (
 	"github.com/emersion/go-message"
 	_ "github.com/emersion/go-message/charset" // decode ISO-8859-*, Windows-125x and other legacy charsets
 	"github.com/emersion/go-message/mail"
+
+	"foonmail/internal/hdr"
 )
 
 // Source says where Message.Text came from.
@@ -258,7 +260,10 @@ func addresses(h *mail.Header, key string) []Address {
 	}
 	out := make([]Address, len(list))
 	for i, a := range list {
-		out[i] = Address{Name: a.Name, Addr: a.Address}
+		// Senders often put an encoded word in quotes ("=?UTF-8?Q?…?="),
+		// which the parser leaves alone as the standard says; decode it
+		// as other mail programs do.
+		out[i] = Address{Name: hdr.Decode(a.Name), Addr: a.Address}
 	}
 	return out
 }

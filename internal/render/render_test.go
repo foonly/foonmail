@@ -357,3 +357,19 @@ func TestZeroFontWrappers(t *testing.T) {
 		t.Errorf("the hidden preheader shows:\n%s", m.Text)
 	}
 }
+
+// TestQuotedEncodedName checks a name sent as an encoded word inside
+// quotes, which the standard says not to decode but senders use anyway.
+func TestQuotedEncodedName(t *testing.T) {
+	m := mustRender(t, raw([]string{
+		`From: "=?UTF-8?Q?Liisa=20M=C3=A4kel=C3=A4?=" <noreply@example.com>`,
+		`To: "=?ISO-8859-1?Q?J=F6rg?=" <jorg@example.org>, kim@example.org`,
+		"Content-Type: text/plain",
+	}, "Hei."), Options{})
+	if len(m.From) != 1 || m.From[0].Name != "Liisa Mäkelä" || m.From[0].Addr != "noreply@example.com" {
+		t.Errorf("From = %+v", m.From)
+	}
+	if len(m.To) != 2 || m.To[0].Name != "Jörg" || m.To[1].Addr != "kim@example.org" {
+		t.Errorf("To = %+v", m.To)
+	}
+}
