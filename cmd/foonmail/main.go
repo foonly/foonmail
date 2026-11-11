@@ -209,8 +209,13 @@ func (u *ui) follow(events <-chan rpc.Event) {
 func run(w *app.Window, u *ui) error {
 	var ops op.Ops
 	focused := false
+	stall := &stallWatch{limit: 2 * time.Second, log: u.log}
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go stall.watch(500*time.Millisecond, stopWatch)
 	for {
 		ev := w.Event()
+		stall.begin(fmt.Sprintf("%T", ev))
 		if u.expl != nil {
 			u.expl.ListenEvents(ev)
 		}
@@ -230,6 +235,7 @@ func run(w *app.Window, u *ui) error {
 			u.layout(gtx)
 			e.Frame(gtx.Ops)
 		}
+		stall.end()
 	}
 }
 
