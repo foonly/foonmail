@@ -9,6 +9,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/mail"
 	"os"
 	"path/filepath"
@@ -61,6 +62,12 @@ type Account struct {
 	// Default: true.
 	NotifyDetails *bool `toml:"notify_details"`
 
+	// ManageSieve is the server for mail filters, "host:port", logged in to
+	// with the IMAP username and password and STARTTLS. "off" turns
+	// filters off. Default: the IMAP host on port 4190, or off on Gmail,
+	// which has no ManageSieve.
+	ManageSieve string `toml:"managesieve"`
+
 	IMAP    Server  `toml:"imap"`
 	SMTP    Server  `toml:"smtp"`
 	Folders Folders `toml:"folders"`
@@ -80,6 +87,20 @@ type Server struct {
 	Port     int      `toml:"port"`
 	Security Security `toml:"security"`
 	Username string   `toml:"username"`
+}
+
+// SieveAddress is where the account's mail filters are managed, or "" if
+// they aren't.
+func (a *Account) SieveAddress() string {
+	switch {
+	case a.ManageSieve == "off":
+		return ""
+	case a.ManageSieve != "":
+		return a.ManageSieve
+	case a.IsGmail() || a.IMAP.Host == "":
+		return ""
+	}
+	return net.JoinHostPort(a.IMAP.Host, "4190")
 }
 
 // IsGmail reports whether the account is on Gmail (or Google Workspace),

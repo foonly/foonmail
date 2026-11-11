@@ -141,7 +141,8 @@ func run(configPath string, log *slog.Logger) error {
 		if ob != nil {
 			api = ob
 		}
-		svc, err := exportService(conn, db, backends, api, h, waker.Wake, log)
+		svc, err := exportService(conn, db, backends, api, h, waker.Wake,
+			&sieveFilters{cfg: cfg, password: passwords(cfg)}, log)
 		if err != nil {
 			return err
 		}

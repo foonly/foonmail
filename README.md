@@ -51,6 +51,11 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   creates and deletes folders.
 - Server search across all folders, message bodies included, for mail
   that isn't in the cache. What it finds is added to the cache.
+- Mail filters kept on the server (Sieve, over ManageSieve), so they work
+  whichever client is open: file mail from a sender, a domain, a mailing
+  list, to an alias or with a subject into a folder, optionally marked
+  read. Shift+F on a message starts a filter like it and offers to move the
+  matching mail already there.
 - Junking a message brings up the rest of the spam run: the conversations
   in the folder from the same sender (or the same name with a number
   added) with mostly the same subject, or from anyone with nearly the
@@ -158,6 +163,23 @@ The bottom line of the window always shows the keys for what you're doing.
 | u | only unread conversations (ones you read stay until u or Esc turns it off) |
 | / | filter the cached list as you type |
 | Ctrl+Enter in the filter | search the server instead: every folder but Trash and Junk (on Gmail, All Mail), From, To and Subject first, then the whole message. The header shows which folder is being searched; a folder that doesn't answer in time (30 s for headers, 60 s for bodies) is skipped and named there. Results list with their folder, and "in body" for those found by the body alone; Enter opens one in its folder, closing it comes back, / changes the search, Esc goes back to the list |
+| Shift+F (list or conversation) | mail filters: the account's rules, applied by the server as mail arrives |
+
+| In the filter view | |
+|---|---|
+| j / k | choose a rule |
+| n | new rule, filled in from the message Shift+F was pressed on |
+| Enter | edit the rule |
+| d, d | delete it |
+| Shift+j / Shift+k | move it down / up: the first matching rule files the message |
+| e | edit the whole Sieve script in your editor (the server checks it) |
+| y | after a rule made from a message: move the matching mail already in the folder |
+| Esc | back |
+
+In the rule form, Tab moves between its parts, ←/→ choose what to match
+(sender, domain, mailing list, To or Cc, subject), the folder is completed
+from your folders as you type (↑/↓, Enter), Space ticks "also mark it
+read", and Enter saves.
 
 | In the folder pane | |
 |---|---|

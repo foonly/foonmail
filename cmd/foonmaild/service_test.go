@@ -18,6 +18,7 @@ import (
 	"foonmail/internal/dbustest"
 	"foonmail/internal/imapsync"
 	"foonmail/internal/rpc"
+	"foonmail/internal/sieve"
 )
 
 type fakeBackend struct {
@@ -127,8 +128,9 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 	b := &fakeBackend{}
 	fo := &fakeOutbox{}
 	woken := make(chan struct{}, 1)
+	fl := &fakeFilters{scripts: map[string]string{}}
 	svc, err := exportService(bus.Conn(), db, map[int64]backend{acct: b}, fo, h,
-		func() { woken <- struct{}{} }, log)
+		func() { woken <- struct{}{} }, fl, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +252,7 @@ func TestServiceNotRunningAndSecondDaemon(t *testing.T) {
 	}
 
 	e := newServiceEnv(t)
-	if _, err := exportService(e.bus.Conn(), nil, nil, nil, nil, nil, slog.Default()); err == nil {
+	if _, err := exportService(e.bus.Conn(), nil, nil, nil, nil, nil, nil, slog.Default()); err == nil {
 		t.Error("a second service claimed the bus name")
 	}
 }
@@ -347,5 +349,55 @@ func TestServiceSearch(t *testing.T) {
 	}
 	if _, err := e.client.SearchServer(callCtx(t), "nobody", []string{"x"}); !errors.Is(err, rpc.ErrNotFound) {
 		t.Errorf("SearchServer of an unknown account: %v", err)
+	}
+}
+
+// fakeFilters keeps scripts by account; "home" has filters, others don't,
+// and a script containing "broken" is rejected like a server would.
+type fakeFilters struct {
+	mu      sync.Mutex
+	scripts map[string]string
+}
+
+func (f *fakeFilters) GetFilters(_ context.Context, account string) (string, string, error) {
+	if account != "home" {
+		return "", "", errNoFilters
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scripts[account], "roundcube", nil
+}
+
+func (f *fakeFilters) PutFilters(_ context.Context, account, script string) error {
+	if account != "home" {
+		return errNoFilters
+	}
+	if strings.Contains(script, "broken") {
+		return fmt.Errorf("%w: line 1: error: unknown command 'broken'.\nerror: validation failed.", sieve.ErrRejected)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scripts[account] = script
+	return nil
+}
+
+func TestServiceFilters(t *testing.T) {
+	e := newServiceEnv(t)
+	ctx := callCtx(t)
+	if s, other, err := e.client.GetFilters(ctx, "home"); err != nil || s != "" || other != "roundcube" {
+		t.Errorf("GetFilters = %q, %q, %v", s, other, err)
+	}
+	if err := e.client.PutFilters(ctx, "home", "keep;\n"); err != nil {
+		t.Fatal(err)
+	}
+	if s, _, _ := e.client.GetFilters(ctx, "home"); s != "keep;\n" {
+		t.Errorf("after PutFilters: %q", s)
+	}
+	err := e.client.PutFilters(ctx, "home", "broken;")
+	if !errors.Is(err, rpc.ErrRejected) || !strings.Contains(err.Error(), "unknown command 'broken'. error: validation failed.") {
+		t.Errorf("a broken script: %v", err)
+	}
+	if _, _, err := e.client.GetFilters(ctx, "gmail"); !errors.Is(err, rpc.ErrUnsupported) {
+		t.Errorf("an account without filters: %v", err)
 	}
 }

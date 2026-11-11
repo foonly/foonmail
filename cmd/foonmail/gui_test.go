@@ -35,20 +35,22 @@ type fakeDaemon struct {
 	db  *cache.DB
 	raw map[int64][]byte // by cache message id
 
-	mu          sync.Mutex
-	fetched     []int64
-	flagged     []string
-	synced      []int64
-	sent        [][]byte
-	sentVia     []string // the account of each sent message
-	drafts      [][]byte
-	deleted     []string
-	moved       []string
-	moveErr     error
-	folderCalls []string
-	searchCalls []string
-	err         error // returned by every call
-	flagsErr    error
+	mu           sync.Mutex
+	fetched      []int64
+	flagged      []string
+	synced       []int64
+	sent         [][]byte
+	sentVia      []string // the account of each sent message
+	drafts       [][]byte
+	deleted      []string
+	moved        []string
+	moveErr      error
+	folderCalls  []string
+	searchCalls  []string
+	filterScript string
+	filterPuts   int
+	err          error // returned by every call
+	flagsErr     error
 }
 
 func (d *fakeDaemon) FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error) {
@@ -153,6 +155,26 @@ func (d *fakeDaemon) searchCallList() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return slices.Clone(d.searchCalls)
+}
+
+func (d *fakeDaemon) GetFilters(_ context.Context, account string) (string, string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.err != nil {
+		return "", "", d.err
+	}
+	return d.filterScript, "", nil
+}
+
+func (d *fakeDaemon) PutFilters(_ context.Context, account, script string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if strings.Contains(script, "broken") {
+		return fmt.Errorf("%w: line 1: unknown command 'broken'", rpc.ErrRejected)
+	}
+	d.filterScript = script
+	d.filterPuts++
+	return nil
 }
 
 func (d *fakeDaemon) DeleteFolder(ctx context.Context, folderID int64) error {

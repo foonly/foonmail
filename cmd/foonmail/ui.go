@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser"
+	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter · Shift+F mail filters"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -54,6 +54,8 @@ func (u *ui) layout(gtx layout.Context) {
 			u.updateView(gtx)
 		case modeCompose:
 			u.updateCompose(gtx)
+		case modeFilters:
+			u.updateFilters(gtx)
 		}
 		if u.mode == m {
 			break
@@ -66,6 +68,8 @@ func (u *ui) layout(gtx layout.Context) {
 		u.layoutView(gtx)
 	case modeCompose:
 		u.layoutCompose(gtx)
+	case modeFilters:
+		u.layoutFilters(gtx)
 	}
 	u.releaseTextFocus(gtx)
 	if u.focusReq != nil {
@@ -147,7 +151,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "M"},
 			key.Filter{Focus: t, Name: "R"},
 			key.Filter{Focus: t, Name: "G"},
-			key.Filter{Focus: t, Name: "F"},
+			key.Filter{Focus: t, Name: "F", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: key.NameEscape},
 			key.Filter{Focus: t, Name: "Q"},
 			key.Filter{Focus: t, Name: key.NameTab, Optional: key.ModShift},
@@ -218,7 +222,11 @@ func (u *ui) updateList(gtx layout.Context) {
 		case "G":
 			u.replyFromList(kindReplyAll)
 		case "F":
-			u.replyFromList(kindForward)
+			if ke.Modifiers.Contain(key.ModShift) {
+				u.openFilters()
+			} else {
+				u.replyFromList(kindForward)
+			}
 		case "/":
 			u.endSimilar()
 			u.searching = true
@@ -593,7 +601,7 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "M"},
 			key.Filter{Name: "R"},
 			key.Filter{Name: "G"},
-			key.Filter{Name: "F"},
+			key.Filter{Name: "F", Optional: key.ModShift},
 			key.Filter{Name: "O"},
 			key.Filter{Name: "W"},
 			key.Filter{Name: "B"},
@@ -678,6 +686,8 @@ func (u *ui) updateView(gtx layout.Context) {
 			u.replyFromView(kindReplyAll)
 		case name == "V":
 			u.openMovePane()
+		case name == "F" && ke.Modifiers.Contain(key.ModShift):
+			u.openFilters()
 		case name == "F":
 			u.replyFromView(kindForward)
 		case name == key.NameSpace || name == key.NamePageDown:

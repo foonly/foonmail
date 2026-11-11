@@ -283,3 +283,19 @@ username = "me"
 		t.Error("Seconds")
 	}
 }
+
+func TestSieveAddress(t *testing.T) {
+	for _, c := range []struct {
+		host, setting, want string
+	}{
+		{"mail.example.org", "", "mail.example.org:4190"},
+		{"imap.gmail.com", "", ""},
+		{"mail.example.org", "off", ""},
+		{"mail.example.org", "sieve.example.org:2000", "sieve.example.org:2000"},
+	} {
+		a := Account{ManageSieve: c.setting, IMAP: Server{Host: c.host}}
+		if got := a.SieveAddress(); got != c.want {
+			t.Errorf("%s %q: %q, want %q", c.host, c.setting, got, c.want)
+		}
+	}
+}

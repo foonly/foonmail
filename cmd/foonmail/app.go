@@ -43,6 +43,8 @@ type daemon interface {
 	DeleteFolder(ctx context.Context, folderID int64) error
 	SearchServer(ctx context.Context, account string, words []string) (int64, error)
 	CancelSearch(ctx context.Context, id int64) error
+	GetFilters(ctx context.Context, account string) (script, otherActive string, err error)
+	PutFilters(ctx context.Context, account, script string) error
 }
 
 type mode int
@@ -51,6 +53,7 @@ const (
 	modeList mode = iota
 	modeView
 	modeCompose
+	modeFilters
 )
 
 // part is one message of the open conversation.
@@ -139,6 +142,7 @@ type ui struct {
 	marks         map[string]bool    // marked conversations, by key
 	similar       *similarSet        // the list narrowed to look-alikes of junked mail
 	server        *serverSearch      // Ctrl+Enter: server search results replace the list
+	filters       *filterView        // Shift+F: the account's mail filters
 	onlyUnread    bool               // u: the list shows unread conversations only
 	wasUnread     map[string]bool    // conversations shown as unread since u, kept when read
 	markBase      map[string]bool    // the marks before the current Shift range

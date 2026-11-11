@@ -18,6 +18,8 @@
 //	MoveMessages(folder x, uids au, dest x)     move messages to another folder
 //	SearchServer(account s, words as) → (id x)  search the server's folders; results follow as signals
 //	CancelSearch(id x)                          stop a server search
+//	GetFilters(account s) → (script s, other s) the "foonmail" Sieve script ("" if none) and another active script's name
+//	PutFilters(account s, script s)             store the "foonmail" script, checked by the server, and activate it
 //
 // and these signals:
 //
@@ -54,11 +56,13 @@ const (
 	SignalSearchDone     = Interface + ".SearchDone"
 
 	// D-Bus error names, mapped to the Go errors below.
-	ErrNameOffline  = Interface + ".Error.Offline"
-	ErrNameNotFound = Interface + ".Error.NotFound"
-	ErrNameFailed   = Interface + ".Error.Failed"
-	ErrNameTooLate  = Interface + ".Error.TooLate"
-	ErrNameTooLarge = Interface + ".Error.TooLarge"
+	ErrNameOffline     = Interface + ".Error.Offline"
+	ErrNameNotFound    = Interface + ".Error.NotFound"
+	ErrNameFailed      = Interface + ".Error.Failed"
+	ErrNameTooLate     = Interface + ".Error.TooLate"
+	ErrNameTooLarge    = Interface + ".Error.TooLarge"
+	ErrNameUnsupported = Interface + ".Error.Unsupported"
+	ErrNameRejected    = Interface + ".Error.Rejected"
 )
 
 var (
@@ -70,6 +74,12 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrTooLate means the message was already being sent when undo came.
 	ErrTooLate = errors.New("too late to undo: the message is already being sent")
+	// ErrUnsupported means the account can't do that, such as filters on
+	// a server without ManageSieve.
+	ErrUnsupported = errors.New("not available for this account")
+	// ErrRejected means the server refused, such as a filter script that
+	// doesn't compile; the error text is its reason.
+	ErrRejected = errors.New("rejected by the server")
 	// ErrTooLarge means the message is over the server's size limit.
 	ErrTooLarge = errors.New("the message is larger than the server accepts")
 )
@@ -136,6 +146,20 @@ func (c *Client) SearchServer(ctx context.Context, account string, words []strin
 	var id int64
 	err := c.call(ctx, "SearchServer", account, words).Store(&id)
 	return id, mapError(err)
+}
+
+// GetFilters returns an account's filter script ("" if it has none yet)
+// and the name of another Sieve script that is active instead, if any.
+// ErrUnsupported means the account has no server-side filters.
+func (c *Client) GetFilters(ctx context.Context, account string) (script, otherActive string, err error) {
+	err = c.call(ctx, "GetFilters", account).Store(&script, &otherActive)
+	return script, otherActive, mapError(err)
+}
+
+// PutFilters stores an account's filter script and makes it the active
+// one. ErrRejected carries the server's reason when the script is wrong.
+func (c *Client) PutFilters(ctx context.Context, account, script string) error {
+	return mapError(c.call(ctx, "PutFilters", account, script).Err)
 }
 
 // CancelSearch stops a server search.
@@ -293,6 +317,10 @@ func mapError(err error) error {
 		return ErrTooLate
 	case ErrNameTooLarge:
 		return wrap(ErrTooLarge)
+	case ErrNameUnsupported:
+		return wrap(ErrUnsupported)
+	case ErrNameRejected:
+		return wrap(ErrRejected)
 	}
 	return err
 }

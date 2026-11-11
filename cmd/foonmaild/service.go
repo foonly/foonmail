@@ -46,12 +46,14 @@ type service struct {
 	syncNow func()
 
 	searches searches
+	filters  filterStore // nil: no filters, as in tests that don't need them
 }
 
 // exportService puts the daemon's interface on conn and claims rpc.BusName.
-// syncNow is what the Sync method calls.
-func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob outboxAPI, h *hub, syncNow func(), log *slog.Logger) (*service, error) {
-	s := &service{conn: conn, db: db, backends: backends, outbox: ob, hub: h, syncNow: syncNow, log: log}
+// syncNow is what the Sync method calls; filters may be nil.
+func exportService(conn *dbus.Conn, db *cache.DB, backends map[int64]backend, ob outboxAPI, h *hub, syncNow func(),
+	filters filterStore, log *slog.Logger) (*service, error) {
+	s := &service{conn: conn, db: db, backends: backends, outbox: ob, hub: h, syncNow: syncNow, filters: filters, log: log}
 	if err := conn.Export(methods{s}, rpc.Path, rpc.Interface); err != nil {
 		return nil, err
 	}

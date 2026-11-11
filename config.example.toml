@@ -42,6 +42,11 @@ aliases = ["postmaster@example.com", "@example.net"]
 # Show sender and subject in new-mail notifications.
 # notify_details = true
 
+# Where mail filters (Shift+F) are kept: a ManageSieve server, logged in to
+# with the IMAP username and password over STARTTLS. Default: the IMAP host
+# on port 4190; Gmail has none. "off" turns filters off.
+# managesieve = "mail.example.com:4190"
+
 [account.imap]
 host = "mail.example.com"
 username = "you"
