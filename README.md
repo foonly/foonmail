@@ -154,7 +154,7 @@ and ? (F1 while writing) lists every key, with what it does.
 | c or ← | folders |
 | Tab / Shift+Tab | next / previous account |
 | m | new message |
-| r / g / f | reply / reply all / forward |
+| r / Shift+R / f | reply all / reply to the sender / forward |
 | a / s / d | archive / junk / trash |
 | v | move to a folder (the folder pane opens to choose one) |
 | Shift+j/k, Space | mark a range / mark one; a, s, d, v, N and ! then act on all marked (Esc clears) |

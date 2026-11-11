@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply · g reply all · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter · Shift+F mail filters · ? all keys"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply · g reply all · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters · ? all keys"
+	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply all · R reply · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter · Shift+F mail filters · ? all keys"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply all · R reply · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters · ? all keys"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -160,7 +160,7 @@ func (u *ui) updateList(gtx layout.Context) {
 			key.Filter{Focus: t, Name: "D"},
 			key.Filter{Focus: t, Name: key.NameDeleteForward},
 			key.Filter{Focus: t, Name: "M"},
-			key.Filter{Focus: t, Name: "R"},
+			key.Filter{Focus: t, Name: "R", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: "G"},
 			key.Filter{Focus: t, Name: "F", Optional: key.ModShift},
 			key.Filter{Focus: t, Name: "?", Optional: key.ModShift},
@@ -233,9 +233,13 @@ func (u *ui) updateList(gtx layout.Context) {
 			u.moveConversation(toTrash)
 		case "M":
 			u.newMessage()
-		case "R":
-			u.replyFromList(kindReply)
-		case "G":
+		case "R": // r replies to all, Shift+R to the sender only
+			if ke.Modifiers.Contain(key.ModShift) {
+				u.replyFromList(kindReply)
+			} else {
+				u.replyFromList(kindReplyAll)
+			}
+		case "G": // reply all's old key, kept for habit
 			u.replyFromList(kindReplyAll)
 		case "F":
 			if ke.Modifiers.Contain(key.ModShift) {
@@ -615,7 +619,7 @@ func (u *ui) updateView(gtx layout.Context) {
 			key.Filter{Name: "D"},
 			key.Filter{Name: key.NameDeleteForward},
 			key.Filter{Name: "M"},
-			key.Filter{Name: "R"},
+			key.Filter{Name: "R", Optional: key.ModShift},
 			key.Filter{Name: "G"},
 			key.Filter{Name: "F", Optional: key.ModShift},
 			key.Filter{Name: "?", Optional: key.ModShift},
@@ -691,15 +695,17 @@ func (u *ui) updateView(gtx layout.Context) {
 			u.moveConversation(toTrash)
 		case name == "M":
 			u.newMessage()
-		case name == "R":
+		case name == "R" && ke.Modifiers.Contain(key.ModShift):
 			u.replyFromView(kindReply)
+		case name == "R":
+			u.replyFromView(kindReplyAll)
 		case name == "O":
 			u.attachment(o, false)
 		case name == "W":
 			u.attachment(o, true)
 		case name == "B":
 			u.openInBrowser(o)
-		case name == "G":
+		case name == "G": // reply all's old key, kept for habit
 			u.replyFromView(kindReplyAll)
 		case name == "V":
 			u.openMovePane()

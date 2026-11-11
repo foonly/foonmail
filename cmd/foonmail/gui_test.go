@@ -794,7 +794,7 @@ func TestNextReachesShortLastMessage(t *testing.T) {
 		t.Errorf("p: current %d, want 1", o.cur)
 	}
 	// Replies answer the current message.
-	h.press("R")
+	h.press("R", key.ModShift)
 	h.eventually("compose", func() bool { return h.u.mode == modeCompose })
 	if got := h.u.comp.base.InReplyTo; got != "b@test" {
 		t.Errorf("replied to %q, want the current message b@test", got)

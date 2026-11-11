@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"slices"
@@ -61,7 +62,7 @@ func TestNewMessage(t *testing.T) {
 
 func TestReplyFromList(t *testing.T) {
 	h := newHarness(t)
-	h.press("R") // the "Kahvi?" conversation: newest not-from-me is Liisa's
+	h.press("R", key.ModShift) // the "Kahvi?" conversation: newest not-from-me is Liisa's
 	h.eventually("compose open", func() bool { return h.u.mode == modeCompose })
 	c := h.u.comp
 	if c.to.Text() != "Liisa <liisa@example.com>" || !strings.HasPrefix(c.subject.Text(), "Re: ") {
@@ -240,4 +241,33 @@ func TestSavingAContinuedDraftReplacesIt(t *testing.T) {
 		saved, deleted := h.daemon.draftCalls()
 		return len(saved) == 1 && slices.Equal(deleted, []string{fmt.Sprintf("%d:[5]", drafts.ID)})
 	})
+}
+
+// TestReplyKeys checks that r replies to all and Shift+R to the sender
+// only, from the list and from a conversation.
+func TestReplyKeys(t *testing.T) {
+	h := newHarness(t)
+	// Liisa's message also went to Bob.
+	id := h.ids["c"]
+	h.daemon.raw[id] = bytes.Replace(h.daemon.raw[id], []byte("Subject:"),
+		[]byte("To: Kim <me@example.org>\r\nCc: Bob <bob@example.com>\r\nSubject:"), 1)
+
+	check := func(what string, press func(), wantCc string) {
+		t.Helper()
+		press()
+		h.eventually(what+": compose", func() bool { return h.u.mode == modeCompose })
+		c := h.u.comp
+		if c.to.Text() != "Liisa <liisa@example.com>" || c.cc.Text() != wantCc {
+			t.Errorf("%s: To %q, Cc %q, want Cc %q", what, c.to.Text(), c.cc.Text(), wantCc)
+		}
+		h.press(key.NameEscape) // nothing written: leaves at once
+	}
+	check("r in the list", func() { h.press("R") }, "Bob <bob@example.com>")
+	check("Shift+R in the list", func() { h.press("R", key.ModShift) }, "")
+	check("g in the list", func() { h.press("G") }, "Bob <bob@example.com>")
+
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	check("r in the view", func() { h.press("R") }, "Bob <bob@example.com>")
+	check("Shift+R in the view", func() { h.press("R", key.ModShift) }, "")
 }
