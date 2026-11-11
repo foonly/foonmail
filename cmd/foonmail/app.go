@@ -696,8 +696,13 @@ func rebuildMissing(e cache.Entry, r *render.Message, known []cache.Entry) []ren
 		}
 	}
 	rb := render.Rebuild(r)
+	// Only older messages can be quoted: not the reply itself, which may be
+	// from the same sender a minute later.
+	older := slices.DeleteFunc(slices.Clone(known), func(k cache.Entry) bool {
+		return k.ID == e.ID || (e.MessageID != "" && k.MessageID == e.MessageID) || !k.Date.Before(e.Date)
+	})
 	for i := len(rb) - 1; i >= 0; i-- {
-		if slices.ContainsFunc(known, func(k cache.Entry) bool { return sameMessage(rb[i], k) }) {
+		if slices.ContainsFunc(older, func(k cache.Entry) bool { return sameMessage(rb[i], k) }) {
 			return rb[i+1:]
 		}
 	}

@@ -81,7 +81,13 @@ func TestRebuildMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := cache.Entry{InReplyTo: "second"}
+	e := cache.Entry{InReplyTo: "second", MessageID: "third",
+		Summary: cache.Summary{ID: 3, From: cache.Address{Addr: "liisa@example.com"}, Date: time.Date(2026, 11, 4, 13, 31, 0, 0, time.Local)}}
+	// The reply itself is known, from Liisa a minute after the quote of
+	// her earlier message, and doesn't stop the chain.
+	if got := rebuildMissing(e, m, []cache.Entry{e}); len(got) != 2 {
+		t.Errorf("reply known: %d rebuilt", len(got))
+	}
 	if got := rebuildMissing(e, m, nil); len(got) != 2 {
 		t.Errorf("nothing known: %d rebuilt", len(got))
 	}
