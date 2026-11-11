@@ -25,7 +25,7 @@ import (
 
 const (
 	listHints = "j/k move · Shift+j/k or Space mark · Enter open · c or ← folders · Tab next account · m new · v move to · r reply all · R reply · f forward · a archive · s junk · d trash · N read/unread · ! flag · u unread only · / filter · Shift+F mail filters · ? all keys"
-	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply all · R reply · f forward · a archive · s junk · d trash · v move to · ! flag · h quoted text · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters · ? all keys"
+	viewHints = "Esc back · j/k or →/← conversations · n/p or ↑/↓ messages · r reply all · R reply · f forward · a archive · s junk · d trash · v move to · ! flag · h quotes and signatures · number + Enter opens a link · o/w open/save attachment · b HTML in browser · Shift+F mail filters · ? all keys"
 )
 
 // layout handles each mode's events right before drawing it: Gio drops
@@ -1011,9 +1011,9 @@ func (u *ui) partWidget(o *openConv, p *part, i, width int) layout.Widget {
 				rows = append(rows, layout.Rigid(u.section("Links", links, true)))
 			}
 			if hidden > 0 {
-				what := fmt.Sprintf("%d more links in the quoted text · h shows them", hidden)
+				what := fmt.Sprintf("%d more links in the folded text · h shows them", hidden)
 				if hidden == 1 {
-					what = "1 more link in the quoted text · h shows it"
+					what = "1 more link in the folded text · h shows it"
 				}
 				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					l := material.Label(u.th, u.th.TextSize*0.85, what)
@@ -1217,6 +1217,9 @@ func (u *ui) rebuiltWidget(o *openConv, p *part, i int) layout.Widget {
 				text := r.Text
 				if strings.TrimSpace(text) == "" {
 					text = "(The quote has no text.)"
+				}
+				if !o.showQuotes {
+					text, _ = foldSignatures(text, nil)
 				}
 				return u.coloredText(gtx, &p.body, u.mono, u.th.TextSize, text, []colorSpan{{0, len(text), u.muted}})
 			}),

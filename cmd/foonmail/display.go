@@ -64,24 +64,78 @@ func bodyView(m *render.Message, showQuotes bool) (string, []textSpan) {
 				who = "the earlier message"
 			}
 			line := fmt.Sprintf("[… quoted text from %s, %d lines · h shows it]", who, q.Lines)
-			text = text[:q.Start] + line + text[q.End:]
-			delta := len(line) - (q.End - q.Start)
-			kept := marks[:0]
-			for _, s := range marks {
-				switch {
-				case s.end <= q.Start:
-				case s.start >= q.End:
-					s.start += delta
-					s.end += delta
-				default:
-					continue // inside the collapsed quote
-				}
-				kept = append(kept, s)
-			}
-			marks = append(kept, textSpan{start: q.Start, end: q.Start + len(line), kind: spanMuted})
+			text, marks = foldText(text, marks, q.Start, q.End, line)
 		}
+		text, marks = foldSignatures(text, marks)
 	}
 	return text, append(lineSpans(text), marks...)
+}
+
+// foldText replaces text[start:end] with a muted line, moving the spans after
+// it and dropping those inside.
+func foldText(text string, marks []textSpan, start, end int, line string) (string, []textSpan) {
+	text = text[:start] + line + text[end:]
+	delta := len(line) - (end - start)
+	kept := marks[:0]
+	for _, s := range marks {
+		switch {
+		case s.end <= start:
+		case s.start >= end:
+			s.start += delta
+			s.end += delta
+		default:
+			continue // inside the folded text
+		}
+		kept = append(kept, s)
+	}
+	return text, append(kept, textSpan{start: start, end: start + len(line), kind: spanMuted})
+}
+
+// signatureKept is how many lines of a signature stay shown when it is
+// folded: usually the name and the company.
+const signatureKept = 2
+
+// foldSignatures shortens long signatures to their first lines. A
+// signature runs from a "-- " line to a quote, a folded quote, or the end.
+func foldSignatures(text string, marks []textSpan) (string, []textSpan) {
+	type block struct{ start, end, hidden int }
+	var blocks []block
+	ls := strings.Split(text, "\n")
+	off := make([]int, len(ls)+1) // byte offset of each line
+	for i, l := range ls {
+		off[i+1] = off[i] + len(l) + 1
+	}
+	for i := 0; i < len(ls); i++ {
+		if ls[i] != "-- " && ls[i] != "--" {
+			continue
+		}
+		var lines []int // non-blank lines of the signature
+		j := i + 1
+		for ; j < len(ls); j++ {
+			if quoteDepth(ls[j]) > 0 || strings.HasPrefix(ls[j], "[… ") || ls[j] == "-- " || ls[j] == "--" {
+				break
+			}
+			if strings.TrimSpace(ls[j]) != "" {
+				lines = append(lines, j)
+			}
+		}
+		// Fold only when it hides more than the note takes.
+		if len(lines) >= signatureKept+2 {
+			last := lines[len(lines)-1]
+			blocks = append(blocks, block{
+				start:  off[lines[signatureKept-1]+1],
+				end:    off[last] + len(ls[last]),
+				hidden: len(lines) - signatureKept,
+			})
+		}
+		i = j - 1
+	}
+	for k := len(blocks) - 1; k >= 0; k-- {
+		b := blocks[k]
+		line := fmt.Sprintf("[… %d more lines of signature · h shows them]", b.hidden)
+		text, marks = foldText(text, marks, b.start, b.end, line)
+	}
+	return text, marks
 }
 
 // lineSpans finds quoted lines and the signature in shown text.

@@ -113,7 +113,7 @@ var helpSections = []helpSection{
 			{"↓ / ↑", "Scroll through a long message, then go on to the next or previous one."},
 			{"Space / -", "Page down or up."},
 			{"j / k, → / ←", "Next or previous conversation in the list."},
-			{"h", "Show or hide quoted text."},
+			{"h", "Show or hide quoted text and the rest of long signatures, which show their first two lines."},
 			{"number, Enter", "Open link number so-and-so in the browser. The numbers are shown after each link."},
 			{"o / w", "Open an attachment, or save it to your downloads folder. Type its number first if there are several. Programs and scripts are only saved, never opened."},
 			{"b", "Show the message's HTML in your browser, with remote images and scripts blocked."},

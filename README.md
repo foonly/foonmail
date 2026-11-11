@@ -31,7 +31,8 @@ There is also **foonmailctl**, a command-line tool for the daemon.
   text version is just a stub or badly made, the HTML version is used
   instead.
 - Color for links, quoted text (by depth), attributions and signatures.
-  Quoted text at the end of a reply is folded away until you press h.
+  Quoted text at the end of a reply is folded away until you press h, and so
+  are long signatures after their first two lines.
 - Conversations you were added to late: the earlier messages are read back
   from the quote in the reply and shown before it, muted with a dashed bar,
   marked as rebuilt rather than real.
@@ -198,7 +199,7 @@ read", and Enter saves.
 | n / p, ↓ / ↑ | next / previous message (arrows scroll through long ones first) |
 | j / k, → / ← | next / previous conversation |
 | Space / - | page down / up |
-| h | show or hide quoted text |
+| h | show or hide quoted text and long signatures |
 | ! | flag or unflag the conversation |
 | number, Enter | open that link |
 | o / w | open / save the attachment (type its number first if there are several) |
