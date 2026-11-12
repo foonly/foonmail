@@ -1,8 +1,8 @@
 // Command foonmaild is the foonmail daemon. It keeps the mail cache in step
 // with every configured account and reports new mail.
 //
-// The tray icon and desktop notifications are not wired up yet; for now
-// events are logged.
+// The tray icon and desktop notifications ride on the session bus (see
+// connectDesktop); without a bus the daemon still syncs.
 package main
 
 import (

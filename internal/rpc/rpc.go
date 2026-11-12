@@ -9,7 +9,7 @@
 //	SetFlags(folder x, uids au, add as, remove as)
 //	Acknowledge()                               the user is looking: clear "new"
 //	Status() → (a(sbsii))                       per account: name, online, error, unread, new
-//	Send(account s, raw ay) → (id x)           queue a message; sent after a 10-second undo window
+//	Send(account s, raw ay) → (id x)           queue a message; sent after the undo window (undo_delay in the config)
 //	Undo(id x)                                  take it back while waiting; it goes to Drafts
 //	Resolve(id x, resend b)                     settle an uncertain or failed message
 //	Outbox() → (a(xssssx))                      unfinished and recent messages
