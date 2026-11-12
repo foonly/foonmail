@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"slices"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -146,9 +148,19 @@ func (m methods) SyncFolder(folderID int64) *dbus.Error {
 	return dbusError(b.SyncFolder(ctx, folderID))
 }
 
+// flagPattern matches the flags the daemon passes on to the server: a system
+// flag (\Seen) or a keyword, an IMAP atom. The cache stores flags
+// space-separated, so anything looser would corrupt the stored list.
+var flagPattern = regexp.MustCompile(`^\\?[A-Za-z0-9_-]+$`)
+
 func (m methods) SetFlags(folderID int64, uids []uint32, add, remove []string) *dbus.Error {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
+	for _, f := range slices.Concat(add, remove) {
+		if !flagPattern.MatchString(f) {
+			return dbusError(fmt.Errorf("invalid flag %q: %w", f, imapsync.ErrInvalid))
+		}
+	}
 	b, err := m.s.backendFor(ctx, folderID)
 	if err != nil {
 		return dbusError(err)

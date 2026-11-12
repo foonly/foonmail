@@ -146,6 +146,31 @@ func callCtx(t *testing.T) context.Context {
 	return ctx
 }
 
+// Flags arrive over D-Bus and are stored space-separated in the cache, so
+// only IMAP atoms may pass: no spaces, quotes or other specials.
+func TestServiceRejectsInvalidFlags(t *testing.T) {
+	e := newServiceEnv(t)
+	ctx := callCtx(t)
+	for _, bad := range []string{"", "two words", `\`, "a;b", `quo"te`, `\Seen x`} {
+		if err := e.client.SetFlags(ctx, e.inbox, []uint32{3, 4}, []string{bad}, nil); err == nil {
+			t.Errorf("add %q accepted", bad)
+		}
+		if err := e.client.SetFlags(ctx, e.inbox, []uint32{3, 4}, nil, []string{bad}); err == nil {
+			t.Errorf("remove %q accepted", bad)
+		}
+	}
+	if got := e.backend.recorded(); len(got) != 0 {
+		t.Errorf("invalid flags reached the backend: %v", got)
+	}
+	// Valid flags still go through.
+	if err := e.client.SetFlags(ctx, e.inbox, []uint32{3, 4}, []string{`\Seen`}, nil); err != nil {
+		t.Errorf("valid SetFlags: %v", err)
+	}
+	if !slices.Equal(e.backend.recorded(), []string{"flags"}) {
+		t.Errorf("backend calls = %v", e.backend.recorded())
+	}
+}
+
 func TestServiceMethods(t *testing.T) {
 	e := newServiceEnv(t)
 	ctx := callCtx(t)
