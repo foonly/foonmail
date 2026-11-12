@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,7 +116,21 @@ func openStore(path string) (*store, error) {
 			return nil, err
 		}
 	}
+	tightenDBFiles(path)
 	return &store{db: db}, nil
+}
+
+// tightenDBFiles makes the database file and its sidecars readable only by
+// their owner. SQLite creates them with the process umask, often
+// world-readable, and the outbox holds whole messages, Bcc included; the
+// parent directory is 0700 only when foonmail created it, not when it was
+// already there.
+func tightenDBFiles(path string) {
+	for _, p := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("couldn't restrict permissions on a database file", "path", p, "err", err)
+		}
+	}
 }
 
 func (s *store) close() error { return s.db.Close() }

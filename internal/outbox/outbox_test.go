@@ -8,6 +8,8 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -266,6 +268,43 @@ func (e *env) submit(raw string) int64 {
 		e.t.Fatal(err)
 	}
 	return id
+}
+
+func TestOpenStoreTightensFilePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "outbox.db")
+	st, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		fi, err := os.Stat(p)
+		if errors.Is(err, os.ErrNotExist) {
+			continue // sidecars only exist while the WAL is in use
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s is %v, want -rw-------", p, fi.Mode().Perm())
+		}
+	}
+	st.close()
+	// A database an older foonmail left world-readable is tightened on open.
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err = openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.close()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("reopened %s is %v, want -rw-------", path, fi.Mode().Perm())
+	}
 }
 
 func TestSendAfterUndoWindow(t *testing.T) {

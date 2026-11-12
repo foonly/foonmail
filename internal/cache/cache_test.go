@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -140,6 +141,39 @@ func TestRefusesNewerSchema(t *testing.T) {
 	if _, err := Open(f.path); err == nil || !strings.Contains(err.Error(), "newer than this foonmail") {
 		t.Errorf("err = %v", err)
 	}
+}
+
+// dbFilePerms fails the test if any of the database's files isn't 0600.
+func dbFilePerms(t *testing.T, path string) {
+	t.Helper()
+	for _, p := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		fi, err := os.Stat(p)
+		if errors.Is(err, os.ErrNotExist) {
+			continue // sidecars only exist while the WAL is in use
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s is %v, want -rw-------", p, fi.Mode().Perm())
+		}
+	}
+}
+
+func TestOpenTightensFilePermissions(t *testing.T) {
+	f := newFixture(t)
+	dbFilePerms(t, f.path)
+	// A database an older foonmail left world-readable is tightened on open.
+	if err := os.Chmod(f.path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.db.Close()
+	db, err := Open(f.path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db.Close()
+	dbFilePerms(t, f.path)
 }
 
 func TestAddListAndFlags(t *testing.T) {

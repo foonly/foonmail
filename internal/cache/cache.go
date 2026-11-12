@@ -12,6 +12,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -49,7 +51,20 @@ func Open(path string) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("cache %s: %w", path, err)
 	}
+	tightenDBFiles(path)
 	return d, nil
+}
+
+// tightenDBFiles makes the database file and its sidecars readable only by
+// their owner. SQLite creates them with the process umask, often
+// world-readable, and they hold whole messages; the parent directory is
+// 0700 only when foonmail created it, not when it was already there.
+func tightenDBFiles(path string) {
+	for _, p := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("couldn't restrict permissions on a database file", "path", p, "err", err)
+		}
+	}
 }
 
 // ErrNoCache means the cache doesn't exist yet or was made by a different
