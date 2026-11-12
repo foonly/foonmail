@@ -232,13 +232,15 @@ func addressList(as []render.Address) string {
 }
 
 // linkURL returns the URL for a typed link number, if it is one that may be
-// opened: web and mail links only.
+// opened: web, ftp and mail links only, as the renderer numbers them.
 func linkURL(links []render.Link, typed string) (string, bool) {
 	for _, l := range links {
 		if fmt.Sprint(l.N) == typed {
 			lower := strings.ToLower(l.URL)
-			if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "mailto:") {
-				return l.URL, true
+			for _, scheme := range []string{"https://", "http://", "ftp://", "mailto:"} {
+				if strings.HasPrefix(lower, scheme) {
+					return l.URL, true
+				}
 			}
 			return "", false
 		}

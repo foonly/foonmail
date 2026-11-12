@@ -171,7 +171,9 @@ func build(d *Draft, strict bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		writeBase64(aw, data)
+		if err := writeBase64(aw, data); err != nil {
+			return nil, fmt.Errorf("attachment %s: %w", name, err)
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, err
@@ -196,19 +198,32 @@ func writeQP(w io.Writer, body string) error {
 	return qp.Close()
 }
 
-func writeBase64(w io.Writer, data []byte) {
+func writeBase64(w io.Writer, data []byte) error {
 	const line = 76
 	enc := make([]byte, base64Len(len(data)))
 	b64.Encode(enc, data)
+	write := func(p []byte) error {
+		_, err := w.Write(p)
+		return err
+	}
 	for len(enc) > line {
-		w.Write(enc[:line])
-		w.Write([]byte("\r\n"))
+		if err := write(enc[:line]); err != nil {
+			return err
+		}
+		if err := write([]byte("\r\n")); err != nil {
+			return err
+		}
 		enc = enc[line:]
 	}
 	if len(enc) > 0 {
-		w.Write(enc)
-		w.Write([]byte("\r\n"))
+		if err := write(enc); err != nil {
+			return err
+		}
+		if err := write([]byte("\r\n")); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // formatDate is how attributions and forward headers show a date.
