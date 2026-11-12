@@ -23,8 +23,10 @@ func TestToggleFlagged(t *testing.T) {
 	if c := h.u.current(); c.flagged {
 		t.Fatal("! again didn't unflag it")
 	}
-	// The newest message is flagged; unflagging clears it again.
+	// The newest message is flagged; unflagging clears it again. The daemon
+	// call goes in a goroutine, so wait for both to have landed.
 	want := []string{`[2] +[\Flagged] -[]`, `[2] +[] -[\Flagged]`}
+	h.eventually("both flag calls", func() bool { return len(h.flagCalls()) >= len(want) })
 	if got := h.flagCalls(); !slices.Equal(got, want) {
 		t.Errorf("daemon calls %q, want %q", got, want)
 	}
@@ -36,6 +38,7 @@ func TestToggleFlagged(t *testing.T) {
 	h.press(key.NameReturn)
 	h.press("!", key.ModShift)
 	want = append(want, `[2 3] +[\Flagged] -[]`)
+	h.eventually("all four flag calls", func() bool { return len(h.flagCalls()) >= 4 })
 	if got := h.flagCalls(); len(got) != 4 || got[2] != want[2] {
 		t.Errorf("daemon calls %q", got)
 	}
