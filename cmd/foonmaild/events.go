@@ -80,6 +80,7 @@ type hub struct {
 	newMail  map[mailKey]bool // new since the user last looked
 
 	events  chan imapsync.Event
+	done    chan struct{} // closed when run returns, so sends to the hub stop blocking
 	opens   chan openRequest
 	closed  chan uint32 // a summary notification was closed
 	flushAt <-chan time.Time
@@ -100,6 +101,7 @@ func newHub(ctx context.Context, cfg *config.Config, db *cache.DB, n notifier, t
 		accounts:     map[string]*accountState{},
 		newMail:      map[mailKey]bool{},
 		events:       make(chan imapsync.Event, 256),
+		done:         make(chan struct{}),
 		opens:        make(chan openRequest, 8),
 		closed:       make(chan uint32, 8),
 		statusReq:    make(chan chan []rpc.AccountStatus),
@@ -124,8 +126,15 @@ func newHub(ctx context.Context, cfg *config.Config, db *cache.DB, n notifier, t
 	return h, nil
 }
 
-// notify is the imapsync.Options.Notify callback for every account.
-func (h *hub) notify(ev imapsync.Event) { h.events <- ev }
+// notify is the imapsync.Options.Notify callback for every account. Once
+// run has returned (shutdown) the event is dropped rather than blocking the
+// sync goroutine forever on a full channel.
+func (h *hub) notify(ev imapsync.Event) {
+	select {
+	case h.events <- ev:
+	case <-h.done:
+	}
+}
 
 // activate is the tray icon's click handler.
 func (h *hub) activate() {
@@ -198,6 +207,7 @@ func (h *hub) statusChanged() {
 }
 
 func (h *hub) run(ctx context.Context) {
+	defer close(h.done)
 	h.updateTray()
 	h.lastStatus = h.snapshot()
 	for {

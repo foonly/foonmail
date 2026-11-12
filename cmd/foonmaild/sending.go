@@ -37,8 +37,13 @@ func (c copier) AppendDraft(ctx context.Context, account string, raw []byte) err
 	return s.AppendDraft(ctx, raw)
 }
 
-// notifyOutbox is the outbox's Notify callback.
-func (h *hub) notifyOutbox(ev outbox.Event) { h.outboxEvents <- ev }
+// notifyOutbox is the outbox's Notify callback; dropped once run has returned.
+func (h *hub) notifyOutbox(ev outbox.Event) {
+	select {
+	case h.outboxEvents <- ev:
+	case <-h.done:
+	}
+}
 
 // undoResult is the outcome of an Undo pressed on a notification.
 type undoResult struct {
@@ -133,7 +138,10 @@ func (h *hub) undo(id int64) {
 		return
 	}
 	if err := h.outbox.Undo(ctx, id); err != nil {
-		h.undoResults <- undoResult{id: id, err: err}
+		select {
+		case h.undoResults <- undoResult{id: id, err: err}:
+		case <-h.done:
+		}
 	}
 }
 

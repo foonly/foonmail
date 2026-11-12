@@ -14,6 +14,7 @@ import (
 	"foonmail/internal/config"
 	"foonmail/internal/imapsync"
 	"foonmail/internal/notify"
+	"foonmail/internal/outbox"
 	"foonmail/internal/tray"
 )
 
@@ -61,12 +62,13 @@ func (f *fakeTray) state() tray.State {
 }
 
 type hubEnv struct {
-	t     *testing.T
-	h     *hub
-	db    *cache.DB
-	inbox int64
-	notes *fakeNotifier
-	tray  *fakeTray
+	t      *testing.T
+	h      *hub
+	db     *cache.DB
+	inbox  int64
+	notes  *fakeNotifier
+	tray   *fakeTray
+	cancel context.CancelFunc
 }
 
 func newHubEnv(t *testing.T, details bool, accounts ...string) *hubEnv {
@@ -89,6 +91,7 @@ func newHubEnv(t *testing.T, details bool, accounts ...string) *hubEnv {
 	e := &hubEnv{t: t, db: db, notes: &fakeNotifier{caps: []string{"actions"}}, tray: &fakeTray{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	e.cancel = cancel
 	e.h, err = newHub(ctx, cfg, db, e.notes, e.tray, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +126,28 @@ func (e *hubEnv) arrive(uid uint32, from, subject string, seen bool) {
 		e.t.Fatal(err)
 	}
 	e.h.notify(imapsync.NewMail{Account: "home", UID: uid, Envelope: env, Seen: seen})
+}
+
+// After run has returned, sends to the hub's channels must not block, even
+// once the buffers are full: the sync and outbox goroutines call these at
+// shutdown, and a blocked send would hang the daemon's exit.
+func TestNotifyAfterRunReturns(t *testing.T) {
+	e := newHubEnv(t, true)
+	e.cancel()
+	<-e.h.done // run has returned and closed done
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for i := 0; i < 300; i++ { // past both channel buffers
+			e.h.notify(imapsync.UnreadChanged{Account: "home", Unread: 1})
+			e.h.notifyOutbox(outbox.Event{Kind: outbox.SentOK, ID: int64(i)})
+		}
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a send to the hub blocked after run returned")
+	}
 }
 
 func TestSingleMailNotifiesAndLightsTray(t *testing.T) {
