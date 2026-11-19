@@ -1058,3 +1058,58 @@ func TestPrefetch(t *testing.T) {
 		t.Error("a message over prefetchMaxSize was prefetched")
 	}
 }
+
+// freezableConn stops talking once frozen, like a link that died without
+// either side noticing: writes go nowhere and what the server sends is
+// dropped, so commands wait for an answer that never comes.
+type freezableConn struct {
+	net.Conn
+	frozen *atomic.Bool
+}
+
+func (c freezableConn) Read(p []byte) (int, error) {
+	for {
+		n, err := c.Conn.Read(p)
+		if err != nil || !c.frozen.Load() {
+			return n, err
+		}
+	}
+}
+
+func (c freezableConn) Write(p []byte) (int, error) {
+	if c.frozen.Load() {
+		return len(p), nil
+	}
+	return c.Conn.Write(p)
+}
+
+func TestShutdownDoesNotWaitOnADeadServer(t *testing.T) {
+	e := newEnv(t, "Sent")
+	var frozen atomic.Bool
+	e.syncer.opts.Dial = func(srv config.Server, opts *imapclient.Options) (*imapclient.Client, error) {
+		conn, err := net.Dial("tcp", srv.Address())
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(freezableConn{conn, &frozen}, opts), nil
+	}
+	e.appendTo("INBOX", "hello")
+	e.start()
+	e.eventually("online", func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return slices.ContainsFunc(e.events, func(ev Event) bool { c, ok := ev.(ConnectionChanged); return ok && c.Online })
+	})
+	e.eventually("folders listed", func() bool { _, ok := e.folder("Sent"); return ok })
+
+	// Ending IDLE and logging out would each wait commandTimeout, and the
+	// LOGOUT after a failed DONE would never be answered at all.
+	frozen.Store(true)
+	start := time.Now()
+	e.cancel()
+	select {
+	case <-e.done:
+	case <-time.After(shutdownGrace + 3*time.Second):
+		t.Fatalf("Run still running %s after cancel", time.Since(start).Round(time.Millisecond))
+	}
+}

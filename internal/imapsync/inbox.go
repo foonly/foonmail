@@ -62,6 +62,7 @@ func (s *Syncer) inboxSession(ctx context.Context, wake <-chan struct{}) error {
 		return err
 	}
 	defer c.Close()
+	defer closeOnCancel(ctx, c)()
 
 	condstore := c.Caps().Has(imap.CapCondStore)
 	folder, err := s.db.EnsureFolder(ctx, s.accountID, "INBOX")

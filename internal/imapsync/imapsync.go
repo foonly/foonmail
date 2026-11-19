@@ -35,6 +35,7 @@ import (
 
 const (
 	commandTimeout       = 30 * time.Second
+	shutdownGrace        = 2 * time.Second
 	defaultCheckInterval = 5 * time.Minute
 	maxBackoff           = time.Minute
 )
@@ -88,6 +89,7 @@ func (ConnectionChanged) isEvent() {}
 var (
 	errWoken      = errors.New("woken to reconnect")
 	errNoResponse = errors.New("no response") // a command timed out; the connection is closed
+	errConnClosed = errors.New("connection closed")
 )
 
 // Syncer syncs one account.
@@ -242,6 +244,29 @@ func (s *Syncer) connect(handler *imapclient.UnilateralDataHandler) (*imapclient
 	return c, nil
 }
 
+// closeOnCancel closes c shutdownGrace after ctx is cancelled. Shutting
+// down then doesn't wait on a slow or unresponsive server for up to
+// commandTimeout per command: the session has that long to end IDLE and log
+// out politely, and whatever command is still running then fails. Calling
+// the returned function, once the session is over, cancels this.
+func closeOnCancel(ctx context.Context, c *imapclient.Client) (stop func()) {
+	var timer *time.Timer
+	var mu sync.Mutex
+	stopAfter := context.AfterFunc(ctx, func() {
+		mu.Lock()
+		defer mu.Unlock()
+		timer = time.AfterFunc(shutdownGrace, func() { c.Close() })
+	})
+	return func() {
+		stopAfter()
+		mu.Lock()
+		defer mu.Unlock()
+		if timer != nil {
+			timer.Stop()
+		}
+	}
+}
+
 func dialServer(srv config.Server, opts *imapclient.Options) (*imapclient.Client, error) {
 	if srv.Security == config.SecurityStartTLS {
 		return imapclient.DialStartTLS(srv.Address(), opts)
@@ -256,17 +281,34 @@ func do(c *imapclient.Client, what string, f func() error) error {
 }
 
 // doWithin is do with another timeout.
+//
+// It also gives up as soon as the connection is closed: go-imap fails the
+// commands pending then, but one sent afterwards never completes, so
+// without this, cleanup after a dropped connection (UNSELECT, ending IDLE,
+// LOGOUT) would wait out the timeout each.
 func doWithin(c *imapclient.Client, what string, timeout time.Duration, f func() error) error {
 	done := make(chan error, 1)
 	go func() { done <- f() }()
 	t := time.NewTimer(timeout)
 	defer t.Stop()
-	select {
-	case err := <-done:
+	result := func(err error) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", what, err)
 		}
 		return nil
+	}
+	select {
+	case err := <-done:
+		return result(err)
+	case <-c.Closed():
+		// An answer that came just before the close still counts, such
+		// as the server's goodbye to LOGOUT.
+		select {
+		case err := <-done:
+			return result(err)
+		default:
+			return fmt.Errorf("%s: %w", what, errConnClosed)
+		}
 	case <-t.C:
 		c.Close()
 		return fmt.Errorf("%s: %w in %s", what, errNoResponse, timeout)
