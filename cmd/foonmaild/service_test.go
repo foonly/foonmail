@@ -57,6 +57,10 @@ func (b *fakeBackend) FetchBody(_ context.Context, folderID int64, uid uint32) (
 	return 1000 + int64(uid), nil
 }
 
+func (b *fakeBackend) FetchBodies(_ context.Context, folderID int64, uids []uint32) error {
+	return b.record("fetch bodies")
+}
+
 func (b *fakeBackend) DeleteMessages(_ context.Context, folderID int64, uids []uint32) error {
 	return b.record("delete")
 }

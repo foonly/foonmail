@@ -973,3 +973,88 @@ func TestSearchSkipsAFolderThatDoesNotAnswer(t *testing.T) {
 		}
 	}
 }
+
+// fetched reports whether the cache has the body of a message.
+func (e *env) fetched(folder string, uid uint32) bool {
+	f, ok := e.folder(folder)
+	if !ok {
+		return false
+	}
+	sts, err := e.db.BodyStates(context.Background(), f.ID, []uint32{uid})
+	return err == nil && len(sts) == 1 && sts[0].Fetched
+}
+
+func TestFetchBodies(t *testing.T) {
+	e := newEnv(t, "Archive")
+	for _, s := range []string{"one", "two", "three"} {
+		e.appendTo("Archive", s)
+	}
+	e.start()
+	defer e.stop()
+	e.eventually("folders listed", func() bool { _, ok := e.folder("Archive"); return ok })
+	archive, _ := e.folder("Archive")
+
+	// Archive isn't watched: the first fetch syncs it, then gets all three.
+	if err := e.syncer.FetchBodies(reqCtx(t), archive.ID, []uint32{1, 2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	for uid := uint32(1); uid <= 3; uid++ {
+		if !e.fetched("Archive", uid) {
+			t.Errorf("uid %d not fetched", uid)
+		}
+		if slices.Contains(e.serverFlags("Archive", uid), imap.FlagSeen) {
+			t.Errorf("fetching uid %d marked it read on the server", uid)
+		}
+	}
+
+	// A UID that isn't there fails, after the others are stored.
+	e.appendTo("Archive", "four")
+	err := e.syncer.FetchBodies(reqCtx(t), archive.ID, []uint32{4, 99})
+	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "99") {
+		t.Errorf("unknown UID: err = %v", err)
+	}
+	if !e.fetched("Archive", 4) {
+		t.Error("uid 4 not fetched alongside the unknown one")
+	}
+}
+
+func TestPrefetch(t *testing.T) {
+	e := newEnv(t)
+	// uid 1 is older than the newest prefetchCount; the newest is big.
+	e.appendTo("INBOX", "old")
+	for i := range prefetchCount - 1 {
+		e.appendTo("INBOX", fmt.Sprintf("recent %d", i))
+	}
+	big := uint32(prefetchCount + 1)
+	e.appendRaw("INBOX", "Subject: big\r\nDate: Wed, 04 Nov 2026 12:00:00 +0200\r\n\r\n"+
+		strings.Repeat("x", prefetchMaxSize)+"\r\n")
+	e.start()
+	defer e.stop()
+
+	// The newest messages are fetched without anyone asking.
+	last := big - 1
+	e.eventually("newest prefetched", func() bool {
+		for uid := uint32(2); uid <= last; uid++ {
+			if !e.fetched("INBOX", uid) {
+				return false
+			}
+		}
+		return true
+	})
+	if slices.Contains(e.serverFlags("INBOX", last), imap.FlagSeen) {
+		t.Error("prefetching marked a message read on the server")
+	}
+
+	// New mail is prefetched as it arrives.
+	e.appendTo("INBOX", "newer")
+	e.eventually("new mail prefetched", func() bool { return e.fetched("INBOX", big+1) })
+
+	// Older messages and big ones are left for when they're opened.
+	time.Sleep(200 * time.Millisecond) // a few polls, each of which prefetches
+	if e.fetched("INBOX", 1) {
+		t.Error("a message older than the newest prefetchCount was prefetched")
+	}
+	if e.fetched("INBOX", big) {
+		t.Error("a message over prefetchMaxSize was prefetched")
+	}
+}

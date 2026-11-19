@@ -25,6 +25,7 @@ const callTimeout = time.Minute
 type backend interface {
 	SyncFolder(ctx context.Context, folderID int64) error
 	FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error)
+	FetchBodies(ctx context.Context, folderID int64, uids []uint32) error
 	SetFlags(ctx context.Context, folderID int64, uids []uint32, add, remove []string) error
 	DeleteMessages(ctx context.Context, folderID int64, uids []uint32) error
 	MoveMessages(ctx context.Context, folderID int64, uids []uint32, dest int64) error
@@ -136,6 +137,16 @@ func (m methods) FetchBody(folderID int64, uid uint32) (int64, *dbus.Error) {
 	}
 	id, err := b.FetchBody(ctx, folderID, uid)
 	return id, dbusError(err)
+}
+
+func (m methods) FetchBodies(folderID int64, uids []uint32) *dbus.Error {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	b, err := m.s.backendFor(ctx, folderID)
+	if err != nil {
+		return dbusError(err)
+	}
+	return dbusError(b.FetchBodies(ctx, folderID, uids))
 }
 
 func (m methods) SyncFolder(folderID int64) *dbus.Error {

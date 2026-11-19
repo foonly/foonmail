@@ -82,6 +82,9 @@ func (s *Syncer) inboxSession(ctx context.Context, wake <-chan struct{}) error {
 		"flag_changes", res.flagChanges, "ms", since(start), "method", res.method)
 	s.notifyNew(res.added)
 	s.notifyFolder(folder.ID, res)
+	if len(res.added) > 0 {
+		s.kickPrefetch()
+	}
 	s.notify(ConnectionChanged{Account: s.acct.Name, Online: true})
 	s.notifyUnread(ctx, folder.ID)
 
@@ -252,6 +255,7 @@ func (s *Syncer) fetchNew(ctx context.Context, c *imapclient.Client, l *live, co
 	}
 	s.log.Info("new mail", "count", len(msgs))
 	s.notifyNew(msgs)
+	s.kickPrefetch()
 	return nil
 }
 

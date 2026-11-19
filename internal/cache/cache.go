@@ -203,6 +203,55 @@ func (d *DB) Location(ctx context.Context, folderID int64, uid uint32) (int64, e
 	return id, err
 }
 
+// BodyState says whether a message's raw content is cached.
+type BodyState struct {
+	ID      int64 // messages.id
+	UID     uint32
+	Size    int64 // RFC822.SIZE, as the server reported it
+	Fetched bool
+}
+
+// BodyStates returns the body state of the messages at a folder's UIDs,
+// in the order given. UIDs the cache doesn't have are left out.
+func (d *DB) BodyStates(ctx context.Context, folderID int64, uids []uint32) ([]BodyState, error) {
+	out := make([]BodyState, 0, len(uids))
+	for _, uid := range uids {
+		st := BodyState{UID: uid}
+		err := d.db.QueryRowContext(ctx, `
+			SELECT m.id, m.size, m.raw IS NOT NULL FROM locations l JOIN messages m ON m.id = l.message_id
+			WHERE l.folder_id = ? AND l.uid = ?`, folderID, uid).Scan(&st.ID, &st.Size, &st.Fetched)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// NewestBodyStates returns the body state of a folder's newest messages,
+// newest first, in the order of List.
+func (d *DB) NewestBodyStates(ctx context.Context, folderID int64, limit int) ([]BodyState, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT m.id, l.uid, m.size, m.raw IS NOT NULL FROM locations l JOIN messages m ON m.id = l.message_id
+		WHERE l.folder_id = ? ORDER BY m.date DESC, l.uid DESC LIMIT ?`, folderID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BodyState
+	for rows.Next() {
+		var st BodyState
+		if err := rows.Scan(&st.ID, &st.UID, &st.Size, &st.Fetched); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
 // Folders lists an account's folders by name.
 func (d *DB) Folders(ctx context.Context, accountID int64) ([]Folder, error) {
 	rows, err := d.db.QueryContext(ctx,

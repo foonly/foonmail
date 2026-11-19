@@ -21,8 +21,9 @@ var specialUseAttrs = []imap.MailboxAttr{
 }
 
 // folderSession keeps the folder list current, syncs watched folders
-// whenever STATUS shows they changed, and serves requests from the GUI
-// between polls.
+// whenever STATUS shows they changed, serves requests from the GUI between
+// polls, and prefetches the bodies of the newest INBOX messages when it has
+// nothing else to do.
 func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error {
 	c, err := s.connect(nil)
 	if err != nil {
@@ -33,8 +34,35 @@ func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error 
 
 	poll := time.NewTimer(0)
 	defer poll.Stop()
+	prefetching := false // the next idle moment fetches a few more bodies
 	for {
+		// A waiting request goes first; prefetching is for when the
+		// connection would otherwise sit idle. (Anything else waits at
+		// most one short prefetch step.)
+		var idle <-chan struct{}
+		if prefetching {
+			idle = alwaysReady
+		}
 		select {
+		case req := <-s.requests:
+			if err := s.serveRequest(ctx, c, req, condstore); err != nil {
+				return err
+			}
+			continue
+		default:
+		}
+		select {
+		case <-idle:
+			more, err := s.prefetchStep(ctx, c, condstore)
+			if err := closedErr(c, err); err != nil {
+				return err
+			}
+			if err != nil {
+				s.log.Warn("prefetching bodies", "err", err)
+			}
+			prefetching = more && err == nil
+		case <-s.prefetchKick:
+			prefetching = true
 		case <-poll.C:
 			folders, err := s.refreshFolders(ctx, c)
 			if err != nil {
@@ -46,14 +74,10 @@ func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error 
 				}
 			}
 			poll.Reset(s.acct.Folders.PollInterval)
+			prefetching = true // also retries what failed last time
 		case req := <-s.requests:
-			res := s.handleRequest(ctx, c, req, condstore)
-			req.reply <- res
-			select {
-			case <-c.Closed():
-				// The request failed because the connection did.
-				return fmt.Errorf("connection lost: %w", res.err)
-			default:
+			if err := s.serveRequest(ctx, c, req, condstore); err != nil {
+				return err
 			}
 		case <-wake:
 			return errWoken
@@ -63,6 +87,82 @@ func (s *Syncer) folderSession(ctx context.Context, wake <-chan struct{}) error 
 			_ = do(c, "logout", func() error { return c.Logout().Wait() })
 			return ctx.Err()
 		}
+	}
+}
+
+const (
+	// prefetchCount is how many of INBOX's newest messages have their
+	// bodies fetched in the background, so they open at once.
+	prefetchCount = 30
+	// prefetchMaxSize leaves bigger messages, such as ones with large
+	// attachments, to be fetched when opened.
+	prefetchMaxSize = 2 << 20
+	// prefetchStepCount is how many bodies one prefetch step fetches
+	// before the connection checks for requests again.
+	prefetchStepCount = 10
+)
+
+// prefetchStep fetches the bodies of a few of INBOX's newest messages that
+// aren't cached yet, and reports whether more are left.
+func (s *Syncer) prefetchStep(ctx context.Context, c *imapclient.Client, condstore bool) (more bool, err error) {
+	inbox, err := s.db.EnsureFolder(ctx, s.accountID, "INBOX")
+	if err != nil {
+		return false, err
+	}
+	sts, err := s.db.NewestBodyStates(ctx, inbox.ID, prefetchCount)
+	if err != nil {
+		return false, err
+	}
+	var uids []uint32
+	for _, st := range sts {
+		if !st.Fetched && st.Size <= prefetchMaxSize {
+			uids = append(uids, st.UID)
+		}
+	}
+	if len(uids) == 0 {
+		return false, nil
+	}
+	step := uids[:min(len(uids), prefetchStepCount)]
+	sel, err := selectFolder(c, inbox.Name, true, condstore)
+	if err != nil {
+		return false, err
+	}
+	defer do(c, "unselect", func() error { return c.Unselect().Wait() })
+	if err := s.fetchBodies(ctx, c, inbox, sel, step, condstore); err != nil {
+		return false, err
+	}
+	s.log.Debug("prefetched bodies", "count", len(step), "left", len(uids)-len(step))
+	return len(uids) > len(step), nil
+}
+
+// kickPrefetch has the folder connection prefetch bodies when it's next
+// idle, such as after new mail.
+func (s *Syncer) kickPrefetch() {
+	select {
+	case s.prefetchKick <- struct{}{}:
+	default:
+	}
+}
+
+// alwaysReady is a closed channel, for a select case that is always ready.
+var alwaysReady = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
+
+// serveRequest answers a request. It returns an error only if the
+// connection is gone, such as because a command timed out.
+func (s *Syncer) serveRequest(ctx context.Context, c *imapclient.Client, req request, condstore bool) error {
+	res := s.handleRequest(ctx, c, req, condstore)
+	req.reply <- res
+	return closedErr(c, res.err)
+}
+
+// closedErr reports a connection that closed, with the error that failed
+// because of it.
+func closedErr(c *imapclient.Client, err error) error {
+	select {
+	case <-c.Closed():
+		return fmt.Errorf("connection lost: %w", err)
+	default:
+		return nil
 	}
 }
 

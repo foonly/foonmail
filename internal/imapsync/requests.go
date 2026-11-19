@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -47,7 +49,6 @@ const (
 type request struct {
 	kind        reqKind
 	folderID    int64
-	uid         uint32
 	uids        []uint32
 	add, remove []string
 	specialUse  string // reqAppend: the folder, by special-use flag
@@ -79,8 +80,26 @@ func (s *Syncer) FetchBody(ctx context.Context, folderID int64, uid uint32) (int
 			return id, nil
 		}
 	}
-	r := s.request(ctx, request{kind: reqFetch, folderID: folderID, uid: uid})
-	return r.messageID, r.err
+	if err := s.FetchBodies(ctx, folderID, []uint32{uid}); err != nil {
+		return 0, err
+	}
+	return s.db.Location(ctx, folderID, uid)
+}
+
+// FetchBodies makes sure the raw content of several messages in a folder
+// is in the cache, with one SELECT and as few FETCHes as their size allows,
+// such as all of a conversation at once. Messages already fetched are
+// skipped. Those that can't be fetched are named in an ErrNotFound error
+// after the others are stored.
+func (s *Syncer) FetchBodies(ctx context.Context, folderID int64, uids []uint32) error {
+	sts, err := s.db.BodyStates(ctx, folderID, uids)
+	if err != nil {
+		return err
+	}
+	if len(sts) == len(uids) && !slices.ContainsFunc(sts, func(st cache.BodyState) bool { return !st.Fetched }) {
+		return nil
+	}
+	return s.request(ctx, request{kind: reqFetch, folderID: folderID, uids: uids}).err
 }
 
 // SetFlags adds and removes flags on messages, on the server and in the
@@ -145,8 +164,7 @@ func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req re
 		return reqResult{}
 
 	case reqFetch:
-		id, err := s.fetchBody(ctx, c, f, sel, req.uid, condstore)
-		return reqResult{messageID: id, err: err}
+		return reqResult{err: s.fetchBodies(ctx, c, f, sel, req.uids, condstore)}
 
 	case reqMove:
 		return reqResult{err: s.moveMessages(ctx, c, f, req, condstore)}
@@ -168,52 +186,109 @@ func (s *Syncer) handleRequest(ctx context.Context, c *imapclient.Client, req re
 	return reqResult{err: errors.New("unknown request")}
 }
 
-func (s *Syncer) fetchBody(ctx context.Context, c *imapclient.Client, f cache.Folder, sel *imap.SelectData,
-	uid uint32, condstore bool) (int64, error) {
-	// The message may be newer than the cache's copy of the folder.
-	id, err := s.db.Location(ctx, f.ID, uid)
-	if errors.Is(err, sql.ErrNoRows) {
-		res, serr := s.syncSelected(ctx, c, f, sel, condstore)
-		if serr != nil {
-			return 0, serr
+// fetchBodies stores the raw content of the selected folder's messages at
+// uids, skipping those already stored.
+func (s *Syncer) fetchBodies(ctx context.Context, c *imapclient.Client, f cache.Folder, sel *imap.SelectData,
+	uids []uint32, condstore bool) error {
+	sts, err := s.db.BodyStates(ctx, f.ID, uids)
+	if err != nil {
+		return err
+	}
+	// Some messages may be newer than the cache's copy of the folder.
+	if len(sts) < len(uids) {
+		res, err := s.syncSelected(ctx, c, f, sel, condstore)
+		if err != nil {
+			return err
 		}
 		s.notifyFolder(f.ID, res)
-		id, err = s.db.Location(ctx, f.ID, uid)
+		if sts, err = s.db.BodyStates(ctx, f.ID, uids); err != nil {
+			return err
+		}
 	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("%s uid %d: %w", f.Name, uid, ErrNotFound)
+	var missing []uint32
+	for _, uid := range uids {
+		if !slices.ContainsFunc(sts, func(st cache.BodyState) bool { return st.UID == uid }) {
+			missing = append(missing, uid)
+		}
 	}
-	if err != nil {
-		return 0, err
-	}
+	sts = slices.DeleteFunc(sts, func(st cache.BodyState) bool { return st.Fetched })
 
+	for len(sts) > 0 {
+		n, size := 0, int64(0)
+		for n < len(sts) && n < fetchBodiesChunk && (n == 0 || size+sts[n].Size <= fetchBodiesBytes) {
+			size += sts[n].Size
+			n++
+		}
+		chunk := sts[:n]
+		sts = sts[n:]
+		got, err := s.fetchRaw(ctx, c, f, chunk, size)
+		if err != nil {
+			return err
+		}
+		for _, st := range chunk {
+			if !got[st.UID] {
+				missing = append(missing, st.UID)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("%s uid %v: the server returned no body: %w", f.Name, missing, ErrNotFound)
+	}
+	return nil
+}
+
+const (
+	// fetchBodiesChunk and fetchBodiesBytes bound one FETCH of bodies, so
+	// a long batch stores what it got as it goes.
+	fetchBodiesChunk = 25
+	fetchBodiesBytes = 8 << 20
+	// minBodyRate is the slowest download a body FETCH is given time for,
+	// on top of commandTimeout, so a big message on a slow link isn't
+	// given up on (and the connection closed) every time it's opened.
+	minBodyRate = 64 << 10 // bytes per second
+)
+
+// fetchRaw FETCHes the bodies of the selected folder's messages and stores
+// them, reporting which UIDs it got. size is their total RFC822.SIZE.
+func (s *Syncer) fetchRaw(ctx context.Context, c *imapclient.Client, f cache.Folder, msgs []cache.BodyState,
+	size int64) (map[uint32]bool, error) {
+	ids := make(map[uint32]int64, len(msgs))
+	set := make([]imap.UID, len(msgs))
+	for i, st := range msgs {
+		ids[st.UID] = st.ID
+		set[i] = imap.UID(st.UID)
+	}
 	section := &imap.FetchItemBodySection{Peek: true} // Peek: reading isn't the same as opening
+	timeout := commandTimeout + time.Duration(size/minBodyRate)*time.Second
+	start := time.Now()
 	var bufs []*imapclient.FetchMessageBuffer
-	if err := do(c, "fetch body", func() (err error) {
-		bufs, err = c.Fetch(imap.UIDSetNum(imap.UID(uid)),
+	if err := doWithin(c, "fetch body", timeout, func() (err error) {
+		bufs, err = c.Fetch(imap.UIDSetNum(set...),
 			&imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{section}}).Collect()
 		return err
 	}); err != nil {
-		return 0, err
+		return nil, err
 	}
-	var raw []byte
+	got := make(map[uint32]bool, len(bufs))
 	for _, b := range bufs {
-		if uint32(b.UID) == uid {
-			raw = b.FindBodySection(section)
+		id, ok := ids[uint32(b.UID)]
+		raw := b.FindBodySection(section)
+		if !ok || raw == nil {
+			continue
 		}
+		// Index what the reader will show, for body search.
+		var text string
+		if m, err := render.Render(raw, render.Options{}); err == nil {
+			text = m.Text
+		}
+		if err := s.db.SetRaw(ctx, id, raw, text); err != nil {
+			return got, err
+		}
+		got[uint32(b.UID)] = true
 	}
-	if raw == nil {
-		return 0, fmt.Errorf("%s uid %d: the server returned no body: %w", f.Name, uid, ErrNotFound)
-	}
-	// Index what the reader will show, for body search.
-	var text string
-	if m, err := render.Render(raw, render.Options{}); err == nil {
-		text = m.Text
-	}
-	if err := s.db.SetRaw(ctx, id, raw, text); err != nil {
-		return 0, err
-	}
-	return id, nil
+	s.log.Debug("bodies fetched", "folder", f.Name, "count", len(got), "bytes", size, "ms", since(start))
+	return got, nil
 }
 
 func (s *Syncer) storeFlags(ctx context.Context, c *imapclient.Client, f cache.Folder, req request) error {

@@ -37,6 +37,7 @@ type fakeDaemon struct {
 
 	mu           sync.Mutex
 	fetched      []int64
+	batches      []string // FetchBodies calls: "folder: uids"
 	flagged      []string
 	synced       []int64
 	sent         [][]byte
@@ -66,6 +67,18 @@ func (d *fakeDaemon) FetchBody(ctx context.Context, folderID int64, uid uint32) 
 		return 0, derr
 	}
 	return id, d.db.SetRaw(ctx, id, d.raw[id], "")
+}
+
+func (d *fakeDaemon) FetchBodies(ctx context.Context, folderID int64, uids []uint32) error {
+	d.mu.Lock()
+	d.batches = append(d.batches, fmt.Sprintf("%d: %v", folderID, uids))
+	d.mu.Unlock()
+	for _, uid := range uids {
+		if _, err := d.FetchBody(ctx, folderID, uid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *fakeDaemon) SyncFolder(_ context.Context, folderID int64) error {
@@ -483,6 +496,24 @@ func TestCachedBodiesNeedNoDaemon(t *testing.T) {
 	}
 	if got := h.daemon.calls().fetched; len(got) != 0 {
 		t.Errorf("FetchBody called for cached bodies: %v", got)
+	}
+}
+
+func TestOpenFetchesBodiesTogether(t *testing.T) {
+	h := newHarness(t)
+	h.press(key.NameReturn)
+	h.eventually("loaded", h.loaded)
+	for i, p := range h.u.conv.parts {
+		if p.err != nil || p.rendered == nil {
+			t.Errorf("part %d: %v", i, p.err)
+		}
+	}
+	// INBOX's two messages in one call; Sent's one on its own.
+	h.daemon.mu.Lock()
+	batches := slices.Clone(h.daemon.batches)
+	h.daemon.mu.Unlock()
+	if want := []string{fmt.Sprintf("%d: [1 2]", h.inbox.ID)}; !slices.Equal(batches, want) {
+		t.Errorf("FetchBodies calls = %q, want %q", batches, want)
 	}
 }
 

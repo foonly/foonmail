@@ -31,6 +31,7 @@ import (
 // use a fake. It is nil when there is no session bus.
 type daemon interface {
 	FetchBody(ctx context.Context, folderID int64, uid uint32) (int64, error)
+	FetchBodies(ctx context.Context, folderID int64, uids []uint32) error
 	SyncFolder(ctx context.Context, folderID int64) error
 	SetFlags(ctx context.Context, folderID int64, uids []uint32, add, remove []string) error
 	Acknowledge(ctx context.Context) error
@@ -361,8 +362,8 @@ func (u *ui) rowAt(y int) int {
 
 // open shows the selected conversation, scrolled to its first unread
 // message (or the last one), and marks its messages in the folder read.
-// Bodies are fetched and rendered in the background, in order, so link
-// numbers run on from one message to the next.
+// Bodies are fetched in the background, all at once, and rendered in
+// order, so link numbers run on from one message to the next.
 func (u *ui) open() { u.openAt(0, 0) }
 
 // openAt opens the selected conversation at one of its messages, such as
@@ -399,6 +400,7 @@ func (u *ui) openAt(folderID int64, uid uint32) {
 	parts := slices.Clone(o.parts) // rebuilt messages are inserted into o.parts meanwhile
 	known := slices.Concat(c.members, c.copies)
 	go func() {
+		u.fetchMissing(parts, parts[target].entry.FolderID)
 		var earlier []render.Link // the same address keeps its number across messages
 		anyShown := false
 		for _, p := range parts {
@@ -421,6 +423,44 @@ func (u *ui) openAt(folderID int64, uid uint32) {
 			u.post(func() { u.setSeen(toMark, true) })
 		}
 	}()
+}
+
+// fetchMissing has the daemon download the bodies of a conversation's
+// messages that aren't cached, with one call per folder, starting with
+// first, instead of one round trip per message. Errors are left for
+// loadRaw to report message by message.
+func (u *ui) fetchMissing(parts []*part, first int64) {
+	if u.daemon == nil {
+		return
+	}
+	byFolder := map[int64][]uint32{}
+	folders := []int64{first}
+	for _, p := range parts {
+		f := p.entry.FolderID
+		if _, ok := byFolder[f]; !ok && f != first {
+			folders = append(folders, f)
+		}
+		byFolder[f] = append(byFolder[f], p.entry.UID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, f := range folders {
+		// The list's Fetched may be out of date: ask the cache.
+		sts, err := u.db.BodyStates(ctx, f, byFolder[f])
+		if err != nil {
+			return
+		}
+		var missing []uint32
+		for _, st := range sts {
+			if !st.Fetched {
+				missing = append(missing, st.UID)
+			}
+		}
+		// A single message is left to loadRaw.
+		if len(missing) > 1 {
+			_ = u.daemon.FetchBodies(ctx, f, missing)
+		}
+	}
 }
 
 // loadRaw returns a message's raw content: from the cache if it was

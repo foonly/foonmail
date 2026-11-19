@@ -6,8 +6,10 @@
 //     expunges to the cache as they happen, and reports new mail.
 //   - The folder connection lists folders, keeps the cache's folder list
 //     current, and polls the configured watched folders with STATUS, syncing
-//     a folder only when STATUS shows it changed. (Syncing a folder the GUI
-//     opens will use this connection too, so it never interrupts IDLE.)
+//     a folder only when STATUS shows it changed. It also serves the GUI's
+//     requests, such as syncing a folder it opens or fetching message
+//     bodies, so they never interrupt IDLE, and when idle it prefetches the
+//     bodies of the newest INBOX messages so they open at once.
 //
 // Both reconnect with backoff. When woken (see Waker: resume from sleep,
 // the network coming up, or a manual sync), both drop their connection, or
@@ -100,7 +102,8 @@ type Syncer struct {
 	baselineValidity uint32 // UIDVALIDITY the baseline belongs to
 	baselineUID      uint32 // INBOX UIDs below this were there at start; see setBaseline
 
-	requests chan request // served by the folder connection
+	requests     chan request  // served by the folder connection
+	prefetchKick chan struct{} // see kickPrefetch
 
 	firstBackoff time.Duration // the first wait to retry; tests make it long
 }
@@ -127,6 +130,8 @@ func New(ctx context.Context, opts Options) (*Syncer, error) {
 		log:       opts.Log.With("account", opts.Account.Name),
 		accountID: id,
 		requests:  make(chan request),
+
+		prefetchKick: make(chan struct{}, 1),
 
 		firstBackoff: time.Second,
 	}, nil

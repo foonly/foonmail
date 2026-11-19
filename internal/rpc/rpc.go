@@ -4,6 +4,7 @@
 // for what needs the daemon:
 //
 //	FetchBody(folder x, uid u) → (message x)   download a message body into the cache
+//	FetchBodies(folder x, uids au)              download several at once, such as a conversation's
 //	SyncFolder(folder x)                        sync a folder now
 //	Sync()                                      reconnect every account and resync now
 //	SetFlags(folder x, uids au, add as, remove as)
@@ -114,6 +115,13 @@ func (c *Client) FetchBody(ctx context.Context, folderID int64, uid uint32) (int
 	var id int64
 	err := c.call(ctx, "FetchBody", folderID, uid).Store(&id)
 	return id, mapError(err)
+}
+
+// FetchBodies makes sure the raw content of several messages in a folder
+// is in the cache, fetching them together. It fails with ErrNotFound,
+// after storing the others, if some couldn't be fetched.
+func (c *Client) FetchBodies(ctx context.Context, folderID int64, uids []uint32) error {
+	return mapError(c.call(ctx, "FetchBodies", folderID, uids).Err)
 }
 
 // SyncFolder syncs a folder now.
