@@ -1,6 +1,33 @@
 # Changelog
 
-## 1.0.0
+## v1.1.0 (2026-11-19)
+
+#### Features
+
+- imapsync: fetch conversation bodies together and prefetch new INBOX mail (e9785f8)
+
+#### Bug Fixes
+
+- imapsync: don't let shutdown wait on a dead connection (0907bde)
+- propagate base64 write errors in compose; let the GUI open ftp links (268eb6f)
+- foonmaild: reject malformed flags over D-Bus (0a89e90)
+- foonmaild: don't block on the hub's channels after run returns (8c48ace)
+- chmod the cache and outbox database files to 0600 when opening them (3e1a851)
+
+#### Documentation
+
+- fix stale comments about the tray and the undo window (cf21204)
+
+#### Tests
+
+- wait for the async daemon flag calls in TestToggleFlagged (f083dd0)
+
+#### Continuous Integration
+
+- install libgles-dev and libegl-dev instead of the Mesa transitional packages (722bcf0)
+- update checkout and setup-go to v7, which run on Node.js 24 (ae4639a)
+
+## v1.0.0 (2026-11-11)
 
 #### Features
 
